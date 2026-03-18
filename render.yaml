@@ -20,7 +20,7 @@ services:
         sync: false
       - key: OLLAMA_MODEL
         value: llama3.2
-    disks:
-      - name: sqlite-data
-        mountPath: /var/data
-        sizeGB: 1
+    disk:
+      name: sqlite-data
+      mountPath: /var/data
+      sizeGB: 1
