@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Reportes Laborales Inteligentes
 
-## Getting Started
+Aplicación web responsive para registrar reportes de trabajo de varios empleados, con login multiusuario y persistencia real en SQLite.
 
-First, run the development server:
+## Que incluye este MVP
+
+- Captura de reportes desde celular o computadora.
+- Login multiusuario con roles (administrador y empleado).
+- Dashboard ejecutivo con pendientes de cotizacion, facturacion y seguimiento.
+- Deteccion de fallas recurrentes por cliente.
+- API route interna para consultar y recalcular el analisis.
+- Persistencia real en base de datos SQLite local (`data/reportes.db`).
+
+## Rutas principales
+
+- `/` resumen general del sistema.
+- `/login` acceso de usuarios.
+- `/reportes` formulario para capturar reportes del personal.
+- `/dashboard` tablero con analisis consolidado.
+- `/api/analyze` endpoint que entrega el resumen actual y acepta nuevos reportes por `POST`.
+
+## Comandos
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
+pnpm lint
+pnpm typecheck
+pnpm build
+pnpm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Variables de entorno
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Crea un archivo `.env.local` a partir de `.env.example`:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cp .env.example .env.local
+```
 
-## Learn More
+Define una clave fuerte para sesión:
 
-To learn more about Next.js, take a look at the following resources:
+- `SESSION_SECRET`: cadena larga y aleatoria para firmar cookies de sesión.
+- `REPORT_OWNER_EMAIL`: correo del propietario que puede cambiar estado de reportes.
+- `SQLITE_DB_PATH` (opcional): ruta absoluta/relativa del archivo SQLite.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Credenciales iniciales
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Se crean automáticamente en el primer arranque (si la base está vacía):
 
-## Deploy on Vercel
+- Administrador: `admin@reportes.local` / `Admin123!`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+No se crean empleados de prueba. El administrador crea usuarios reales desde `/admin/usuarios`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Como funciona el analisis
+
+El motor del MVP revisa el texto del reporte y las banderas seleccionadas para clasificar:
+
+- trabajos pendientes de cotizacion
+- servicios pendientes de facturacion
+- seguimientos operativos por cerrar
+- fallas recurrentes detectadas varias veces en el mismo cliente
+
+## Persistencia
+
+- La base SQLite se guarda en `data/reportes.db`.
+- Usuarios y reportes permanecen entre reinicios del servidor.
+- Si borras la base, el sistema solo recrea el usuario administrador inicial.
+
+## Despliegue para colaboradores (Render)
+
+Este proyecto ya incluye `render.yaml` para despliegue con disco persistente.
+
+1. Sube este repo a GitHub.
+2. En Render: **New + > Blueprint** y selecciona tu repo.
+3. Render leerá `render.yaml` y creará el Web Service con disco `sqlite-data`.
+4. En variables de entorno, confirma:
+	- `SESSION_SECRET` (Render lo genera automáticamente)
+	- `REPORT_OWNER_EMAIL` (ej. `admin@reportes.local`)
+	- `SQLITE_DB_PATH=/var/data/reportes.db`
+5. Despliega y comparte la URL pública HTTPS con tus colaboradores.
+
+Notas:
+
+- El endpoint de IA requiere un Ollama accesible por red (`OLLAMA_HOST`).
+- Si no configuras Ollama en servidor, el resto del sistema (usuarios/reportes/dashboard) funciona normalmente.

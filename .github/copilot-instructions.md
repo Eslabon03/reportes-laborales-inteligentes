@@ -1,0 +1,12 @@
+- [x] Verify that the copilot-instructions.md file in the .github directory is created.
+- [x] Clarify Project Requirements: standalone Next.js workspace in Documents for employee work reports, responsive on desktop and mobile, with capture and admin dashboard.
+- [x] Scaffold the Project: created with Next.js App Router, TypeScript, Tailwind CSS and pnpm.
+- [x] Customize the Project: added routes for capture and dashboard, reusable UI components, mock service layer and API analysis route.
+- [x] Install Required Extensions: no extensions were required for this project type.
+- [x] Compile the Project: validated with pnpm lint and pnpm build.
+- [x] Create and Run Task: added a VS Code task named pnpm: dev for local development.
+- [x] Launch the Project: skipped until the user confirms that a debug launch is desired.
+- [x] Ensure Documentation is Complete: README updated and this file cleaned for the current workspace.
+- Work through each checklist item systematically.
+- Keep communication concise and focused.
+- Follow development best practices.

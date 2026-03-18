@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: reportes-laborales-inteligentes
+    env: node
+    plan: starter
+    autoDeploy: true
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start -- --hostname 0.0.0.0 --port $PORT
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.1
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: REPORT_OWNER_EMAIL
+        value: admin@reportes.local
+      - key: SQLITE_DB_PATH
+        value: /var/data/reportes.db
+      - key: OLLAMA_HOST
+        sync: false
+      - key: OLLAMA_MODEL
+        value: llama3.2
+    disks:
+      - name: sqlite-data
+        mountPath: /var/data
+        sizeGB: 1
