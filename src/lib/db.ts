@@ -120,6 +120,9 @@ database.exec(`
   CREATE INDEX IF NOT EXISTS idx_ai_analysis_history_created_at ON ai_analysis_history (created_at DESC);
 `);
 
+const defaultAdminEmail =
+  process.env.REPORT_OWNER_EMAIL?.trim() || "admin@reportes.local";
+
 const defaultUsers: Array<{
   name: string;
   email: string;
@@ -128,7 +131,7 @@ const defaultUsers: Array<{
 }> = [
   {
     name: "Administrador General",
-    email: "admin@reportes.local",
+    email: defaultAdminEmail,
     password: "Admin123!",
     role: "admin",
   },
