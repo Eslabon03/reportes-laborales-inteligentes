@@ -13,7 +13,7 @@ services:
       - key: SESSION_SECRET
         generateValue: true
       - key: REPORT_OWNER_EMAIL
-        value: admin@reportes.local
+        sync: false
       - key: SQLITE_DB_PATH
         value: /var/data/reportes.db
       - key: OLLAMA_HOST
