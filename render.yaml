@@ -18,6 +18,8 @@ services:
         value: /var/data/reportes.db
       - key: OLLAMA_HOST
         sync: false
+      - key: OLLAMA_API_KEY
+        sync: false
       - key: OLLAMA_MODEL
         value: llama3.2
     disk:
