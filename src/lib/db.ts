@@ -61,65 +61,6 @@ type AiAnalysisHistoryRow = {
   created_at: string;
 };
 
-const databaseFilePath = process.env.SQLITE_DB_PATH?.trim()
-  ? path.resolve(process.env.SQLITE_DB_PATH)
-  : path.join(process.cwd(), "data", "reportes.db");
-
-mkdirSync(path.dirname(databaseFilePath), { recursive: true });
-
-const database = new Database(databaseFilePath);
-database.pragma("journal_mode = WAL");
-database.pragma("foreign_keys = ON");
-
-database.exec(`
-  CREATE TABLE IF NOT EXISTS app_meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('admin', 'employee')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    employee_name TEXT NOT NULL,
-    client_name TEXT NOT NULL,
-    site TEXT NOT NULL,
-    service_date TEXT NOT NULL,
-    summary TEXT NOT NULL,
-    tasks_performed TEXT NOT NULL,
-    pending_actions TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('abierto', 'en-proceso', 'resuelto')),
-    requires_quote INTEGER NOT NULL DEFAULT 0,
-    requires_invoice INTEGER NOT NULL DEFAULT 0,
-    follow_up_required INTEGER NOT NULL DEFAULT 0,
-    failure_type TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
-  );
-
-  CREATE TABLE IF NOT EXISTS ai_analysis_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_by_user_id INTEGER NOT NULL,
-    source_reports_count INTEGER NOT NULL DEFAULT 0,
-    summary_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_reports_user_id ON reports (user_id);
-  CREATE INDEX IF NOT EXISTS idx_reports_service_date ON reports (service_date DESC);
-  CREATE INDEX IF NOT EXISTS idx_reports_client_name ON reports (client_name);
-  CREATE INDEX IF NOT EXISTS idx_ai_analysis_history_created_at ON ai_analysis_history (created_at DESC);
-`);
-
 const defaultAdminEmail =
   process.env.REPORT_OWNER_EMAIL?.trim() || "admin@reportes.local";
 
@@ -136,6 +77,67 @@ const defaultUsers: Array<{
     role: "admin",
   },
 ];
+
+type DatabaseConnection = InstanceType<typeof Database>;
+
+let database: DatabaseConnection | null = null;
+
+function getDatabaseFilePath(): string {
+  return process.env.SQLITE_DB_PATH?.trim()
+    ? path.resolve(process.env.SQLITE_DB_PATH)
+    : path.join(process.cwd(), "data", "reportes.db");
+}
+
+function initializeSchema(connection: DatabaseConnection): void {
+  connection.exec(`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('admin', 'employee')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      employee_name TEXT NOT NULL,
+      client_name TEXT NOT NULL,
+      site TEXT NOT NULL,
+      service_date TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      tasks_performed TEXT NOT NULL,
+      pending_actions TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('abierto', 'en-proceso', 'resuelto')),
+      requires_quote INTEGER NOT NULL DEFAULT 0,
+      requires_invoice INTEGER NOT NULL DEFAULT 0,
+      follow_up_required INTEGER NOT NULL DEFAULT 0,
+      failure_type TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_analysis_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_by_user_id INTEGER NOT NULL,
+      source_reports_count INTEGER NOT NULL DEFAULT 0,
+      summary_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reports_user_id ON reports (user_id);
+    CREATE INDEX IF NOT EXISTS idx_reports_service_date ON reports (service_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_reports_client_name ON reports (client_name);
+    CREATE INDEX IF NOT EXISTS idx_ai_analysis_history_created_at ON ai_analysis_history (created_at DESC);
+  `);
+}
 
 function rowToUser(row: UserRow): DbUser {
   return {
@@ -178,15 +180,15 @@ function rowToAiAnalysisHistory(
   };
 }
 
-function seedDatabase(): void {
-  const insertUserStatement = database.prepare(
+function seedDatabase(connection: DatabaseConnection): void {
+  const insertUserStatement = connection.prepare(
     `
       INSERT OR IGNORE INTO users (name, email, password_hash, role)
       VALUES (@name, @email, @passwordHash, @role)
     `,
   );
 
-  const seedTransaction = database.transaction(() => {
+  const seedTransaction = connection.transaction(() => {
     for (const user of defaultUsers) {
       insertUserStatement.run({
         name: user.name,
@@ -200,9 +202,28 @@ function seedDatabase(): void {
   seedTransaction();
 }
 
-seedDatabase();
+function getDatabase(): DatabaseConnection {
+  if (database) {
+    return database;
+  }
+
+  const databaseFilePath = getDatabaseFilePath();
+  mkdirSync(path.dirname(databaseFilePath), { recursive: true });
+
+  const connection = new Database(databaseFilePath);
+  connection.pragma("journal_mode = WAL");
+  connection.pragma("foreign_keys = ON");
+
+  initializeSchema(connection);
+  seedDatabase(connection);
+
+  database = connection;
+  return connection;
+}
 
 export function listAllUsers(): SessionUser[] {
+  const database = getDatabase();
+
   const rows = database
     .prepare(
       `SELECT id, name, email, role FROM users ORDER BY role DESC, name ASC`,
@@ -225,6 +246,8 @@ export type CreateUserInput = {
 };
 
 export function createUser(input: CreateUserInput): SessionUser {
+  const database = getDatabase();
+
   const passwordHash = bcrypt.hashSync(input.password, 10);
   const result = database
     .prepare(
@@ -255,6 +278,8 @@ export function updateUser(
   id: number,
   input: UpdateUserInput,
 ): SessionUser | null {
+  const database = getDatabase();
+
   const existing = getUserById(id);
   if (!existing) return null;
 
@@ -276,11 +301,15 @@ export function updateUser(
 }
 
 export function deleteUser(id: number): boolean {
+  const database = getDatabase();
+
   const result = database.prepare(`DELETE FROM users WHERE id = ?`).run(id);
   return result.changes > 0;
 }
 
 export function getUserByEmail(email: string): DbUser | null {
+  const database = getDatabase();
+
   const row = database
     .prepare(
       `
@@ -296,6 +325,8 @@ export function getUserByEmail(email: string): DbUser | null {
 }
 
 export function getUserById(id: number): DbUser | null {
+  const database = getDatabase();
+
   const row = database
     .prepare(
       `
@@ -315,6 +346,8 @@ export function saveAiAnalysisHistoryEntry(input: {
   sourceReportsCount: number;
   summaryJson: string;
 }): AiAnalysisHistoryEntry {
+  const database = getDatabase();
+
   const insertResult = database
     .prepare(
       `
@@ -360,6 +393,8 @@ export function saveAiAnalysisHistoryEntry(input: {
 }
 
 export function listAiAnalysisHistory(limit = 10): AiAnalysisHistoryEntry[] {
+  const database = getDatabase();
+
   const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 50);
 
   const rows = database
@@ -384,6 +419,8 @@ export function listAiAnalysisHistory(limit = 10): AiAnalysisHistoryEntry[] {
 }
 
 export function listWorkReports(userId?: number): WorkReport[] {
+  const database = getDatabase();
+
   const rows =
     typeof userId === "number"
       ? (database
@@ -441,6 +478,8 @@ export function updateWorkReportStatusRecord(
   reportId: number,
   status: WorkReport["status"],
 ): WorkReport | null {
+  const database = getDatabase();
+
   const updateResult = database
     .prepare(
       `
@@ -491,6 +530,8 @@ export function createWorkReportRecord(
   input: WorkReportInput,
   author: SessionUser,
 ): WorkReport {
+  const database = getDatabase();
+
   const insertStatement = database.prepare(`
     INSERT INTO reports (
       user_id,
