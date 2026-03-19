@@ -88,4 +88,5 @@ Notas:
 
 - `pnpm check:prod` valida la URL publica y el endpoint de Ollama configurado.
 - `scripts/setup-ollama-vps.sh` deja Ollama instalado, escuchando en `0.0.0.0:11434` y con firewall abierto en un VPS Ubuntu.
+- `scripts/setup-ollama-vps.ps1` ejecuta ese aprovisionamiento por SSH desde Windows para evitar pegar comandos en Hostinger.
 - `render.yaml` ya deja fijo `OLLAMA_HOST=http://72.62.169.135:11434` y `OLLAMA_MODEL=llama3.2:latest` para nuevos deploys.
