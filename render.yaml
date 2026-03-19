@@ -17,7 +17,7 @@ services:
       - key: SQLITE_DB_PATH
         value: /var/data/reportes.db
       - key: OLLAMA_HOST
-        value: http://72.62.169.135:11434
+        sync: false
       - key: OLLAMA_API_KEY
         sync: false
       - key: OLLAMA_MODEL

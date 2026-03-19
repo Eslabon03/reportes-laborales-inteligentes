@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "check:prod": "node scripts/check-production.mjs"
+    "check:prod": "node scripts/check-production.mjs",
+    "rotate:session-secret": "node scripts/render-maintenance.mjs rotate-session-secret",
+    "sync:ollama": "node scripts/render-maintenance.mjs set-ollama-connection"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

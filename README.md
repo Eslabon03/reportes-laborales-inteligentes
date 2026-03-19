@@ -87,6 +87,17 @@ Notas:
 ## Automatizacion util
 
 - `pnpm check:prod` valida la URL publica y el endpoint de Ollama configurado.
+- `pnpm rotate:session-secret` rota `SESSION_SECRET` en Render usando su API.
+- `pnpm sync:ollama -- --host <url> [--api-key <token>] [--model <modelo>]` sincroniza la conexion de Ollama en Render.
 - `scripts/setup-ollama-vps.sh` deja Ollama instalado, escuchando en `0.0.0.0:11434` y con firewall abierto en un VPS Ubuntu.
 - `scripts/setup-ollama-vps.ps1` ejecuta ese aprovisionamiento por SSH desde Windows para evitar pegar comandos en Hostinger.
-- `render.yaml` ya deja fijo `OLLAMA_HOST=http://72.62.169.135:11434` y `OLLAMA_MODEL=llama3.2:latest` para nuevos deploys.
+- `scripts/harden-ollama-proxy.sh` protege Ollama con Nginx + Bearer token y cierra el puerto directo.
+- `scripts/secure-ollama-stack.ps1` hace el hardening del VPS y sincroniza Render en un solo paso desde Windows.
+- `.github/workflows/production-health.yml` corre un health check diario y abre/cierra un issue automaticamente.
+- `.github/workflows/rotate-session-secret.yml` rota `SESSION_SECRET` cada mes si configuras `RENDER_API_KEY` como secreto de GitHub.
+- `.github/workflows/harden-ollama-stack.yml` permite endurecer Ollama desde GitHub Actions si configuras `RENDER_API_KEY` y `VPS_SSH_KEY`.
+
+### Secretos recomendados en GitHub
+
+- `RENDER_API_KEY`: API key de Render para cambiar variables automaticamente.
+- `VPS_SSH_KEY`: llave privada SSH del VPS para el workflow de hardening.
