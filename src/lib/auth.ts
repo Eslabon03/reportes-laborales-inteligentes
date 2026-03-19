@@ -24,10 +24,34 @@ type SessionCookieOptions = {
   secure?: boolean;
 };
 
+function getForwardedProto(request: Request): string | null {
+  const value = request.headers.get("x-forwarded-proto")?.trim();
+
+  if (!value) {
+    return null;
+  }
+
+  return value.split(",")[0]?.trim() || null;
+}
+
 function getSessionSecret(): Uint8Array {
   return new TextEncoder().encode(
     process.env.SESSION_SECRET ?? "cambia-esta-clave-en-produccion",
   );
+}
+
+export function isSecureRequest(request: Request): boolean {
+  const forwardedProto = getForwardedProto(request);
+
+  if (forwardedProto) {
+    return forwardedProto === "https";
+  }
+
+  try {
+    return new URL(request.url).protocol === "https:";
+  } catch {
+    return process.env.NODE_ENV === "production";
+  }
 }
 
 export function isOwnerAccount(user: SessionUser): boolean {

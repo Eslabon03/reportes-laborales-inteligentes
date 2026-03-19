@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
 
-import { clearSessionCookie } from "@/lib/auth";
+import { clearSessionCookie, isSecureRequest } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const response = NextResponse.redirect(new URL("/login", request.url), {
+  const response = new NextResponse(null, {
     status: 303,
+    headers: {
+      Location: "/login",
+    },
   });
 
-  const isHttpsRequest = new URL(request.url).protocol === "https:";
   clearSessionCookie(response, {
-    secure: isHttpsRequest,
+    secure: isSecureRequest(request),
   });
 
   return response;

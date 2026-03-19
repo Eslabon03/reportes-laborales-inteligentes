@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   authenticateCredentials,
   createSessionToken,
+  isSecureRequest,
   setSessionCookie,
 } from "@/lib/auth";
 
@@ -48,9 +49,8 @@ export async function POST(request: Request) {
       user,
     });
 
-    const isHttpsRequest = new URL(request.url).protocol === "https:";
     setSessionCookie(response, token, {
-      secure: isHttpsRequest,
+      secure: isSecureRequest(request),
     });
 
     return response;
