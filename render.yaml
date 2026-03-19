@@ -5,7 +5,7 @@ services:
     plan: starter
     autoDeploy: true
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
-    startCommand: corepack enable && pnpm start -- --hostname 0.0.0.0 --port $PORT
+    startCommand: corepack enable && pnpm exec next start --hostname 0.0.0.0 --port $PORT
     healthCheckPath: /login
     envVars:
       - key: NODE_VERSION
