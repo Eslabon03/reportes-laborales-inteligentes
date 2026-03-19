@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   harden:
-    if: ${{ secrets.RENDER_API_KEY != '' && secrets.VPS_SSH_KEY != '' }}
+    if: ${{ secrets.RENDER_API_KEY != '' && (secrets.VPS_SSH_KEY != '' || secrets.VPS_SSH_PASSWORD != '') }}
     runs-on: ubuntu-latest
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
@@ -29,6 +29,7 @@ jobs:
       VPS_HOST: ${{ inputs.vps_host }}
       VPS_USER: ${{ inputs.vps_user }}
       OLLAMA_MODEL: ${{ inputs.ollama_model }}
+      VPS_SSH_PASSWORD: ${{ secrets.VPS_SSH_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,9 +40,16 @@ jobs:
           node-version: 20
 
       - name: Load SSH key
+        if: ${{ secrets.VPS_SSH_KEY != '' }}
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Setup password auth tools
+        if: ${{ secrets.VPS_SSH_KEY == '' && secrets.VPS_SSH_PASSWORD != '' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
 
       - name: Trust VPS host
         run: |
@@ -52,7 +60,11 @@ jobs:
         id: harden
         shell: bash
         run: |
-          OUTPUT=$(PUBLIC_HOST="$VPS_HOST" OLLAMA_MODEL="$OLLAMA_MODEL" ssh "$VPS_USER@$VPS_HOST" 'bash -s --' < scripts/harden-ollama-proxy.sh)
+          if [ -n "${{ secrets.VPS_SSH_KEY }}" ]; then
+            OUTPUT=$(PUBLIC_HOST="$VPS_HOST" OLLAMA_MODEL="$OLLAMA_MODEL" ssh "$VPS_USER@$VPS_HOST" 'bash -s --' < scripts/harden-ollama-proxy.sh)
+          else
+            OUTPUT=$(PUBLIC_HOST="$VPS_HOST" OLLAMA_MODEL="$OLLAMA_MODEL" sshpass -p "$VPS_SSH_PASSWORD" ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no "$VPS_USER@$VPS_HOST" 'bash -s --' < scripts/harden-ollama-proxy.sh)
+          fi
           echo "$OUTPUT"
           JSON_LINE=$(echo "$OUTPUT" | tail -n 1)
           {
