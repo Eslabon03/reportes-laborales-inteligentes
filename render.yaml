@@ -17,11 +17,11 @@ services:
       - key: SQLITE_DB_PATH
         value: /var/data/reportes.db
       - key: OLLAMA_HOST
-        sync: false
+        value: http://72.62.169.135:11434
       - key: OLLAMA_API_KEY
         sync: false
       - key: OLLAMA_MODEL
-        value: llama3.2
+        value: llama3.2:latest
     disk:
       name: sqlite-data
       mountPath: /var/data
