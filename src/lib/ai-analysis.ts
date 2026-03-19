@@ -123,10 +123,19 @@ function parseAiResponse(raw: string): AiSummary {
   return { resumen, prioridades, recomendaciones, riesgos };
 }
 
+// localtunnel shows a splash page for new IPs; bypass it with a custom fetch
+function makeFetch(): typeof fetch {
+  return (url: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    headers.set("Bypass-Tunnel-Reminder", "true");
+    return fetch(url, { ...init, headers });
+  };
+}
+
 export async function generateAiSummary(
   reports: WorkReport[],
 ): Promise<AiSummary> {
-  const ollama = new Ollama({ host: OLLAMA_HOST });
+  const ollama = new Ollama({ host: OLLAMA_HOST, fetch: makeFetch() });
 
   const userContent = buildReportSummary(reports);
 
