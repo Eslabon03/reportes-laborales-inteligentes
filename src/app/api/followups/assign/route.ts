@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getSessionUser } from "@/lib/auth";
-import { assignFollowup, getUserById } from "@/lib/db";
+import { assignFollowup, getUserById, listAllUsers } from "@/lib/db";
 
 export const runtime = "nodejs";
+
+function normalizeValue(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
 
 export async function POST(request: NextRequest) {
   const currentUser = await getSessionUser();
@@ -35,6 +44,8 @@ export async function POST(request: NextRequest) {
   const body = payload as Record<string, unknown>;
   const reportId = Number.parseInt(String(body.reportId), 10);
   const assignedToUserId = Number.parseInt(String(body.assignedToUserId), 10);
+  const assignedToName =
+    typeof body.assignedToName === "string" ? body.assignedToName.trim() : "";
   const clientName = typeof body.clientName === "string" ? body.clientName.trim() : "";
   const reason = typeof body.reason === "string" ? body.reason.trim() : "";
 
@@ -45,9 +56,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!Number.isInteger(assignedToUserId) || assignedToUserId <= 0) {
+  if (
+    (!Number.isInteger(assignedToUserId) || assignedToUserId <= 0)
+    && !assignedToName
+  ) {
     return NextResponse.json(
-      { message: "El usuario asignado no es válido." },
+      { message: "Ingresa una persona válida para asignar el seguimiento." },
       { status: 422 },
     );
   }
@@ -59,22 +73,53 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const assignedUser = getUserById(assignedToUserId);
+  let resolvedAssignedToUserId: number | null = null;
+  let resolvedAssignedToName = assignedToName;
 
-  if (!assignedUser) {
+  if (Number.isInteger(assignedToUserId) && assignedToUserId > 0) {
+    const assignedUser = getUserById(assignedToUserId);
+
+    if (!assignedUser) {
+      return NextResponse.json(
+        { message: "No se encontró el usuario asignado." },
+        { status: 404 },
+      );
+    }
+
+    resolvedAssignedToUserId = assignedUser.id;
+    resolvedAssignedToName = resolvedAssignedToName || assignedUser.name;
+  } else {
+    const normalizedInput = normalizeValue(assignedToName);
+    const matchedUser = listAllUsers().find((user) => {
+      return (
+        normalizeValue(user.name) === normalizedInput
+        || normalizeValue(user.email) === normalizedInput
+      );
+    });
+
+    if (matchedUser) {
+      resolvedAssignedToUserId = matchedUser.id;
+      resolvedAssignedToName = matchedUser.name;
+    } else {
+      resolvedAssignedToUserId = currentUser.id;
+    }
+  }
+
+  if (!resolvedAssignedToUserId || resolvedAssignedToUserId <= 0) {
     return NextResponse.json(
-      { message: "No se encontró el usuario asignado." },
-      { status: 404 },
+      { message: "No fue posible resolver el responsable del seguimiento." },
+      { status: 422 },
     );
   }
 
   try {
     const assignment = assignFollowup(
       reportId,
-      assignedToUserId,
+      resolvedAssignedToUserId,
       currentUser.id,
       clientName,
       reason,
+      resolvedAssignedToName,
     );
 
     return NextResponse.json({ assignment }, { status: 201 });

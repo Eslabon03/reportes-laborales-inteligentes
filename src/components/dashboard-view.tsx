@@ -29,12 +29,14 @@ type DashboardViewProps = {
   isOwner: boolean;
   initialCompletedPendings: CompletedPendingRecord[];
   initialFollowupAssignments: FollowupAssignmentRecord[];
-  assignableUsers: Array<{
-    id: number;
-    name: string;
-    email: string;
-    role: "admin" | "employee";
-  }>;
+  assignableUsers: AssignableUser[];
+};
+
+type AssignableUser = {
+  id: number;
+  name: string;
+  email: string;
+  role: "admin" | "employee";
 };
 
 type MetricSection = "openReports" | "quotes" | "invoices" | "followups";
@@ -75,6 +77,55 @@ function formatTimestamp(value: string): string {
   const mins = String(date.getMinutes()).padStart(2, "0");
 
   return `${day} ${month} ${year} · ${hours}:${mins}`;
+}
+
+function normalizePersonValue(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function resolveAssigneeByText(
+  typedName: string,
+  users: AssignableUser[],
+): AssignableUser | undefined {
+  const normalizedInput = normalizePersonValue(typedName);
+
+  if (!normalizedInput) {
+    return undefined;
+  }
+
+  const exactMatch = users.find((user) => {
+    return (
+      normalizePersonValue(user.name) === normalizedInput
+      || normalizePersonValue(user.email) === normalizedInput
+    );
+  });
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const startsWithMatches = users.filter((user) => {
+    return normalizePersonValue(user.name).startsWith(normalizedInput);
+  });
+
+  if (startsWithMatches.length === 1) {
+    return startsWithMatches[0];
+  }
+
+  const containsMatches = users.filter((user) => {
+    return normalizePersonValue(user.name).includes(normalizedInput);
+  });
+
+  if (containsMatches.length === 1) {
+    return containsMatches[0];
+  }
+
+  return undefined;
 }
 
 function PendingList({
@@ -351,21 +402,15 @@ export function DashboardView({
       return;
     }
 
-    const assignedUser = assignableUsers.find(
-      (user) => user.name.trim().toLowerCase() === assigneeName.toLowerCase(),
-    );
-
-    if (!assignedUser) {
-      setError("Selecciona un colaborador válido de la lista sugerida.");
-      return;
-    }
+    const assignedUser = resolveAssigneeByText(assigneeName, assignableUsers);
 
     setAssigningReportId(item.reportId);
 
     try {
       const assignment = await assignFollowupToUser({
         reportId: item.reportId,
-        assignedToUserId: assignedUser.id,
+        assignedToUserId: assignedUser?.id,
+        assignedToName: assigneeName,
         clientName: item.clientName,
         reason: item.reason,
       });

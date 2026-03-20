@@ -200,6 +200,21 @@ function initializeSchema(connection: DatabaseConnection): void {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_completed_pendings_unique ON completed_pendings (report_id, pending_type);
       CREATE INDEX IF NOT EXISTS idx_followup_assignments_report ON followup_assignments (report_id);
   `);
+
+    const followupAssignmentColumns = connection
+      .prepare(`PRAGMA table_info(followup_assignments)`)
+      .all() as Array<{ name: string }>;
+
+    const hasAssignedToNameColumn = followupAssignmentColumns.some(
+      (column) => column.name === "assigned_to_name",
+    );
+
+    if (!hasAssignedToNameColumn) {
+      connection.exec(`
+        ALTER TABLE followup_assignments
+        ADD COLUMN assigned_to_name TEXT NOT NULL DEFAULT ''
+      `);
+    }
 }
 
 function rowToUser(row: UserRow): DbUser {
@@ -989,6 +1004,7 @@ export function assignFollowup(
   createdByUserId: number,
   clientName: string,
   reason: string,
+  assignedToName?: string,
 ): FollowupAssignment {
   const database = getDatabase();
 
@@ -998,16 +1014,18 @@ export function assignFollowup(
         INSERT INTO followup_assignments (
           report_id,
           assigned_to_user_id,
+          assigned_to_name,
           created_by_user_id,
           client_name,
           reason
         )
-        VALUES (@reportId, @assignedToUserId, @createdByUserId, @clientName, @reason)
+        VALUES (@reportId, @assignedToUserId, @assignedToName, @createdByUserId, @clientName, @reason)
       `,
     )
     .run({
       reportId,
       assignedToUserId,
+      assignedToName: assignedToName?.trim() ?? "",
       createdByUserId,
       clientName,
       reason,
@@ -1022,7 +1040,7 @@ export function assignFollowup(
           fa.id,
           fa.report_id,
           fa.assigned_to_user_id,
-          u_assigned.name AS assigned_to_name,
+          COALESCE(NULLIF(trim(fa.assigned_to_name), ''), u_assigned.name) AS assigned_to_name,
           fa.created_by_user_id,
           u_created.name AS created_by_name,
           fa.client_name,
@@ -1065,7 +1083,7 @@ export function listFollowupAssignments(limit = 50): FollowupAssignment[] {
           fa.id,
           fa.report_id,
           fa.assigned_to_user_id,
-          u_assigned.name AS assigned_to_name,
+          COALESCE(NULLIF(trim(fa.assigned_to_name), ''), u_assigned.name) AS assigned_to_name,
           fa.created_by_user_id,
           u_created.name AS created_by_name,
           fa.client_name,

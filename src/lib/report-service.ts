@@ -117,7 +117,8 @@ export async function completePending(payload: {
 
 export async function assignFollowupToUser(payload: {
   reportId: string;
-  assignedToUserId: number;
+  assignedToUserId?: number;
+  assignedToName: string;
   clientName: string;
   reason: string;
 }): Promise<FollowupAssignmentRecord> {
