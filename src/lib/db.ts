@@ -197,6 +197,7 @@ function initializeSchema(connection: DatabaseConnection): void {
       );
 
       CREATE INDEX IF NOT EXISTS idx_completed_pendings_report ON completed_pendings (report_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_completed_pendings_unique ON completed_pendings (report_id, pending_type);
       CREATE INDEX IF NOT EXISTS idx_followup_assignments_report ON followup_assignments (report_id);
   `);
 }
@@ -850,6 +851,39 @@ export function markPendingAsCompleted(
   completedByUserId: number,
 ): CompletedPending {
   const database = getDatabase();
+
+  const existingRow = database
+    .prepare(
+      `
+        SELECT
+          cp.id,
+          cp.report_id,
+          cp.pending_type,
+          cp.client_name,
+          cp.employee_name,
+          cp.reason,
+          u.name AS completed_by_name,
+          cp.completed_at
+        FROM completed_pendings cp
+        JOIN users u ON u.id = cp.completed_by_user_id
+        WHERE cp.report_id = ? AND cp.pending_type = ?
+        LIMIT 1
+      `,
+    )
+    .get(reportId, pendingType) as any;
+
+  if (existingRow) {
+    return {
+      id: existingRow.id,
+      reportId: existingRow.report_id,
+      pendingType: existingRow.pending_type,
+      clientName: existingRow.client_name,
+      employeeName: existingRow.employee_name,
+      reason: existingRow.reason,
+      completedByName: existingRow.completed_by_name,
+      completedAt: existingRow.completed_at,
+    };
+  }
 
   const insertResult = database
     .prepare(

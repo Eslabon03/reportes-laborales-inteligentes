@@ -1,6 +1,11 @@
 import { AppNavigation } from "@/components/app-navigation";
 import { DashboardView } from "@/components/dashboard-view";
 import { isOwnerAccount, requireUser } from "@/lib/auth";
+import {
+  listAllUsers,
+  listCompletedPendings,
+  listFollowupAssignments,
+} from "@/lib/db";
 import { getAnalysisSnapshot } from "@/lib/report-store";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +19,9 @@ export default async function DashboardPage() {
 
   const snapshot = getAnalysisSnapshot();
   const isOwner = isOwnerAccount(currentUser);
+  const completedPendings = listCompletedPendings(200);
+  const followupAssignments = listFollowupAssignments(200);
+  const assignableUsers = listAllUsers().filter((user) => user.role === "employee");
 
   return (
     <div className="min-h-screen pb-16">
@@ -33,7 +41,13 @@ export default async function DashboardPage() {
           </p>
         </div>
 
-        <DashboardView initialSnapshot={snapshot} isOwner={isOwner} />
+        <DashboardView
+          initialSnapshot={snapshot}
+          isOwner={isOwner}
+          initialCompletedPendings={completedPendings}
+          initialFollowupAssignments={followupAssignments}
+          assignableUsers={assignableUsers}
+        />
       </main>
     </div>
   );

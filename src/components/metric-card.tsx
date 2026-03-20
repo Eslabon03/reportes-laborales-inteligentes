@@ -11,6 +11,8 @@ type MetricCardProps = {
   value: number | string;
   detail: string;
   tone?: MetricCardTone;
+  onClick?: () => void;
+  isActive?: boolean;
 };
 
 export function MetricCard({
@@ -18,19 +20,40 @@ export function MetricCard({
   value,
   detail,
   tone = "slate",
+  onClick,
+  isActive = false,
 }: MetricCardProps) {
-  return (
-    <div
-      className={[
-        "rounded-[26px] border p-5 shadow-[var(--shadow-panel)] backdrop-blur",
-        toneStyles[tone],
-      ].join(" ")}
-    >
+  const sharedClassName = [
+    "rounded-[26px] border p-5 text-left shadow-[var(--shadow-panel)] backdrop-blur",
+    toneStyles[tone],
+    isActive ? "ring-2 ring-slate-400/70" : "",
+  ].join(" ");
+
+  const content = (
+    <>
       <p className="font-mono text-[11px] uppercase tracking-[0.24em] opacity-70">
         {label}
       </p>
       <p className="mt-4 text-4xl font-semibold tracking-tight">{value}</p>
       <p className="mt-2 text-sm leading-6 opacity-75">{detail}</p>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${sharedClassName} transition hover:-translate-y-0.5 hover:border-slate-400`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={sharedClassName}>
+      {content}
     </div>
   );
 }
