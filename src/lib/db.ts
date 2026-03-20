@@ -170,6 +170,34 @@ function initializeSchema(connection: DatabaseConnection): void {
     CREATE INDEX IF NOT EXISTS idx_reports_client_name ON reports (client_name);
     CREATE INDEX IF NOT EXISTS idx_ai_analysis_history_created_at ON ai_analysis_history (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ai_chat_analysis_created_at ON ai_analysis_chat_messages (analysis_id, created_at ASC, id ASC);
+      CREATE TABLE IF NOT EXISTS completed_pendings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_id INTEGER NOT NULL,
+        pending_type TEXT NOT NULL CHECK (pending_type IN ('quote', 'invoice', 'followup')),
+        client_name TEXT NOT NULL,
+        employee_name TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        completed_by_user_id INTEGER NOT NULL,
+        completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
+        FOREIGN KEY (completed_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+      );
+
+      CREATE TABLE IF NOT EXISTS followup_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_id INTEGER NOT NULL,
+        assigned_to_user_id INTEGER NOT NULL,
+        created_by_user_id INTEGER NOT NULL,
+        client_name TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
+        FOREIGN KEY (assigned_to_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+        FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_completed_pendings_report ON completed_pendings (report_id);
+      CREATE INDEX IF NOT EXISTS idx_followup_assignments_report ON followup_assignments (report_id);
   `);
 }
 
@@ -789,4 +817,243 @@ export function createWorkReportRecord(
   }
 
   return rowToReport(insertedRow);
+}
+
+export type CompletedPending = {
+  id: number;
+  reportId: number;
+  pendingType: "quote" | "invoice" | "followup";
+  clientName: string;
+  employeeName: string;
+  reason: string;
+  completedByName: string;
+  completedAt: string;
+};
+
+export type FollowupAssignment = {
+  id: number;
+  reportId: number;
+  assignedToName: string;
+  assignedToId: number;
+  createdByName: string;
+  clientName: string;
+  reason: string;
+  createdAt: string;
+};
+
+export function markPendingAsCompleted(
+  reportId: number,
+  pendingType: "quote" | "invoice" | "followup",
+  clientName: string,
+  employeeName: string,
+  reason: string,
+  completedByUserId: number,
+): CompletedPending {
+  const database = getDatabase();
+
+  const insertResult = database
+    .prepare(
+      `
+        INSERT INTO completed_pendings (
+          report_id,
+          pending_type,
+          client_name,
+          employee_name,
+          reason,
+          completed_by_user_id
+        )
+        VALUES (@reportId, @pendingType, @clientName, @employeeName, @reason, @completedByUserId)
+      `,
+    )
+    .run({
+      reportId,
+      pendingType,
+      clientName,
+      employeeName,
+      reason,
+      completedByUserId,
+    });
+
+  const insertedId = Number(insertResult.lastInsertRowid);
+
+  const insertedRow = database
+    .prepare(
+      `
+        SELECT
+          cp.id,
+          cp.report_id,
+          cp.pending_type,
+          cp.client_name,
+          cp.employee_name,
+          cp.reason,
+          u.name AS completed_by_name,
+          cp.completed_at
+        FROM completed_pendings cp
+        JOIN users u ON u.id = cp.completed_by_user_id
+        WHERE cp.id = ?
+        LIMIT 1
+      `,
+    )
+    .get(insertedId) as any;
+
+  if (!insertedRow) {
+    throw new Error("No se pudo recuperar el pendiente completado.");
+  }
+
+  return {
+    id: insertedRow.id,
+    reportId: insertedRow.report_id,
+    pendingType: insertedRow.pending_type,
+    clientName: insertedRow.client_name,
+    employeeName: insertedRow.employee_name,
+    reason: insertedRow.reason,
+    completedByName: insertedRow.completed_by_name,
+    completedAt: insertedRow.completed_at,
+  };
+}
+
+export function listCompletedPendings(limit = 50): CompletedPending[] {
+  const database = getDatabase();
+
+  const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 200);
+
+  const rows = database
+    .prepare(
+      `
+        SELECT
+          cp.id,
+          cp.report_id,
+          cp.pending_type,
+          cp.client_name,
+          cp.employee_name,
+          cp.reason,
+          u.name AS completed_by_name,
+          cp.completed_at
+        FROM completed_pendings cp
+        JOIN users u ON u.id = cp.completed_by_user_id
+        ORDER BY cp.completed_at DESC, cp.id DESC
+        LIMIT ?
+      `,
+    )
+    .all(safeLimit) as any[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    reportId: row.report_id,
+    pendingType: row.pending_type,
+    clientName: row.client_name,
+    employeeName: row.employee_name,
+    reason: row.reason,
+    completedByName: row.completed_by_name,
+    completedAt: row.completed_at,
+  }));
+}
+
+export function assignFollowup(
+  reportId: number,
+  assignedToUserId: number,
+  createdByUserId: number,
+  clientName: string,
+  reason: string,
+): FollowupAssignment {
+  const database = getDatabase();
+
+  const insertResult = database
+    .prepare(
+      `
+        INSERT INTO followup_assignments (
+          report_id,
+          assigned_to_user_id,
+          created_by_user_id,
+          client_name,
+          reason
+        )
+        VALUES (@reportId, @assignedToUserId, @createdByUserId, @clientName, @reason)
+      `,
+    )
+    .run({
+      reportId,
+      assignedToUserId,
+      createdByUserId,
+      clientName,
+      reason,
+    });
+
+  const insertedId = Number(insertResult.lastInsertRowid);
+
+  const insertedRow = database
+    .prepare(
+      `
+        SELECT
+          fa.id,
+          fa.report_id,
+          fa.assigned_to_user_id,
+          u_assigned.name AS assigned_to_name,
+          fa.created_by_user_id,
+          u_created.name AS created_by_name,
+          fa.client_name,
+          fa.reason,
+          fa.created_at
+        FROM followup_assignments fa
+        JOIN users u_assigned ON u_assigned.id = fa.assigned_to_user_id
+        JOIN users u_created ON u_created.id = fa.created_by_user_id
+        WHERE fa.id = ?
+        LIMIT 1
+      `,
+    )
+    .get(insertedId) as any;
+
+  if (!insertedRow) {
+    throw new Error("No se pudo recuperar la asignación de seguimiento.");
+  }
+
+  return {
+    id: insertedRow.id,
+    reportId: insertedRow.report_id,
+    assignedToName: insertedRow.assigned_to_name,
+    assignedToId: insertedRow.assigned_to_user_id,
+    createdByName: insertedRow.created_by_name,
+    clientName: insertedRow.client_name,
+    reason: insertedRow.reason,
+    createdAt: insertedRow.created_at,
+  };
+}
+
+export function listFollowupAssignments(limit = 50): FollowupAssignment[] {
+  const database = getDatabase();
+
+  const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 200);
+
+  const rows = database
+    .prepare(
+      `
+        SELECT
+          fa.id,
+          fa.report_id,
+          fa.assigned_to_user_id,
+          u_assigned.name AS assigned_to_name,
+          fa.created_by_user_id,
+          u_created.name AS created_by_name,
+          fa.client_name,
+          fa.reason,
+          fa.created_at
+        FROM followup_assignments fa
+        JOIN users u_assigned ON u_assigned.id = fa.assigned_to_user_id
+        JOIN users u_created ON u_created.id = fa.created_by_user_id
+        ORDER BY fa.created_at DESC, fa.id DESC
+        LIMIT ?
+      `,
+    )
+    .all(safeLimit) as any[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    reportId: row.report_id,
+    assignedToId: row.assigned_to_user_id,
+    assignedToName: row.assigned_to_name,
+    createdByName: row.created_by_name,
+    clientName: row.client_name,
+    reason: row.reason,
+    createdAt: row.created_at,
+  }));
 }
