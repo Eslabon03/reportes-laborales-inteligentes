@@ -27,6 +27,18 @@ export type AiAnalysisHistoryEntry = {
   createdAt: string;
 };
 
+export type AiChatRole = "user" | "assistant";
+
+export type AiAnalysisChatMessageEntry = {
+  id: number;
+  analysisId: number;
+  userId: number;
+  createdByName: string;
+  role: AiChatRole;
+  content: string;
+  createdAt: string;
+};
+
 type UserRow = {
   id: number;
   name: string;
@@ -58,6 +70,16 @@ type AiAnalysisHistoryRow = {
   created_by_name: string;
   source_reports_count: number;
   summary_json: string;
+  created_at: string;
+};
+
+type AiAnalysisChatMessageRow = {
+  id: number;
+  analysis_id: number;
+  user_id: number;
+  created_by_name: string;
+  role: AiChatRole;
+  content: string;
   created_at: string;
 };
 
@@ -132,10 +154,22 @@ function initializeSchema(connection: DatabaseConnection): void {
       FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
     );
 
+    CREATE TABLE IF NOT EXISTS ai_analysis_chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      analysis_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (analysis_id) REFERENCES ai_analysis_history(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_reports_user_id ON reports (user_id);
     CREATE INDEX IF NOT EXISTS idx_reports_service_date ON reports (service_date DESC);
     CREATE INDEX IF NOT EXISTS idx_reports_client_name ON reports (client_name);
     CREATE INDEX IF NOT EXISTS idx_ai_analysis_history_created_at ON ai_analysis_history (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ai_chat_analysis_created_at ON ai_analysis_chat_messages (analysis_id, created_at ASC, id ASC);
   `);
 }
 
@@ -176,6 +210,20 @@ function rowToAiAnalysisHistory(
     createdByName: row.created_by_name,
     sourceReportsCount: row.source_reports_count,
     summaryJson: row.summary_json,
+    createdAt: row.created_at,
+  };
+}
+
+function rowToAiAnalysisChatMessage(
+  row: AiAnalysisChatMessageRow,
+): AiAnalysisChatMessageEntry {
+  return {
+    id: row.id,
+    analysisId: row.analysis_id,
+    userId: row.user_id,
+    createdByName: row.created_by_name,
+    role: row.role,
+    content: row.content,
     createdAt: row.created_at,
   };
 }
@@ -416,6 +464,135 @@ export function listAiAnalysisHistory(limit = 10): AiAnalysisHistoryEntry[] {
     .all(safeLimit) as AiAnalysisHistoryRow[];
 
   return rows.map(rowToAiAnalysisHistory);
+}
+
+export function getAiAnalysisHistoryEntryById(
+  id: number,
+): AiAnalysisHistoryEntry | null {
+  const database = getDatabase();
+
+  const row = database
+    .prepare(
+      `
+        SELECT
+          h.id,
+          h.created_by_user_id,
+          u.name AS created_by_name,
+          h.source_reports_count,
+          h.summary_json,
+          h.created_at
+        FROM ai_analysis_history h
+        JOIN users u ON u.id = h.created_by_user_id
+        WHERE h.id = ?
+        LIMIT 1
+      `,
+    )
+    .get(id) as AiAnalysisHistoryRow | undefined;
+
+  return row ? rowToAiAnalysisHistory(row) : null;
+}
+
+export function saveAiAnalysisChatMessageEntry(input: {
+  analysisId: number;
+  userId: number;
+  role: AiChatRole;
+  content: string;
+}): AiAnalysisChatMessageEntry {
+  const database = getDatabase();
+
+  const insertResult = database
+    .prepare(
+      `
+        INSERT INTO ai_analysis_chat_messages (
+          analysis_id,
+          user_id,
+          role,
+          content
+        )
+        VALUES (@analysisId, @userId, @role, @content)
+      `,
+    )
+    .run({
+      analysisId: input.analysisId,
+      userId: input.userId,
+      role: input.role,
+      content: input.content.trim(),
+    });
+
+  const insertedId = Number(insertResult.lastInsertRowid);
+
+  const insertedRow = database
+    .prepare(
+      `
+        SELECT
+          m.id,
+          m.analysis_id,
+          m.user_id,
+          u.name AS created_by_name,
+          m.role,
+          m.content,
+          m.created_at
+        FROM ai_analysis_chat_messages m
+        JOIN users u ON u.id = m.user_id
+        WHERE m.id = ?
+        LIMIT 1
+      `,
+    )
+    .get(insertedId) as AiAnalysisChatMessageRow | undefined;
+
+  if (!insertedRow) {
+    throw new Error("No se pudo recuperar el mensaje de chat IA recién guardado.");
+  }
+
+  return rowToAiAnalysisChatMessage(insertedRow);
+}
+
+export function listAiAnalysisChatMessagesByAnalysisId(
+  analysisId: number,
+  limit = 120,
+): AiAnalysisChatMessageEntry[] {
+  const database = getDatabase();
+
+  const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 300);
+
+  const rows = database
+    .prepare(
+      `
+        SELECT
+          m.id,
+          m.analysis_id,
+          m.user_id,
+          u.name AS created_by_name,
+          m.role,
+          m.content,
+          m.created_at
+        FROM ai_analysis_chat_messages m
+        JOIN users u ON u.id = m.user_id
+        WHERE m.analysis_id = ?
+        ORDER BY m.created_at ASC, m.id ASC
+        LIMIT ?
+      `,
+    )
+    .all(analysisId, safeLimit) as AiAnalysisChatMessageRow[];
+
+  return rows.map(rowToAiAnalysisChatMessage);
+}
+
+export function deleteAiAnalysisChatMessagesByAnalysisId(
+  analysisId: number,
+): number {
+  const database = getDatabase();
+
+  const result = database
+    .prepare(
+      `
+        DELETE FROM ai_analysis_chat_messages
+        WHERE analysis_id = ?
+      `,
+    )
+    .run(analysisId);
+
+  return result.changes;
 }
 
 export function listWorkReports(userId?: number): WorkReport[] {

@@ -48,6 +48,11 @@ Reglas:
 - Responde SOLO en español
 - Responde SOLO con el JSON, sin texto antes ni después`;
 
+const QA_SYSTEM_PROMPT = `Eres un asistente que responde preguntas sobre un análisis operativo ya generado.
+Solo puedes usar la información incluida en el contexto del análisis proporcionado.
+Si la pregunta pide datos que no aparecen en ese análisis, responde claramente que no está en el análisis actual.
+Responde en español, de forma breve, concreta y accionable.`;
+
 function buildReportSummary(reports: WorkReport[]): string {
 	const activeReports = reports
 		.filter((report) => report.status !== "resuelto")
@@ -147,6 +152,10 @@ function makeFetch(): typeof fetch {
 	};
 }
 
+function buildSummaryContext(summary: AiSummary): string {
+	return JSON.stringify(summary, null, 2);
+}
+
 export async function generateAiSummary(
 	reports: WorkReport[],
 ): Promise<AiSummary> {
@@ -168,4 +177,37 @@ export async function generateAiSummary(
 	});
 
 	return parseAiResponse(response.message.content);
+}
+
+export async function answerQuestionAboutSummary(
+	summary: AiSummary,
+	question: string,
+): Promise<string> {
+	const cleanQuestion = question.trim();
+
+	if (!cleanQuestion) {
+		throw new Error("La pregunta no puede estar vacía.");
+	}
+
+	const ollama = new Ollama({ host: OLLAMA_HOST, fetch: makeFetch() });
+
+	const response = await ollama.chat({
+		model: OLLAMA_MODEL,
+		options: { temperature: 0.2 },
+		messages: [
+			{ role: "system", content: QA_SYSTEM_PROMPT },
+			{
+				role: "user",
+				content: `Contexto del análisis:\n${buildSummaryContext(summary)}\n\nPregunta:\n${cleanQuestion}`,
+			},
+		],
+	});
+
+	const answer = response.message.content.trim();
+
+	if (!answer) {
+		return "No tengo información suficiente dentro de este análisis para responder esa pregunta.";
+	}
+
+	return answer;
 }
