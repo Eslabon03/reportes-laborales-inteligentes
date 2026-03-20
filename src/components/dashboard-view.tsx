@@ -717,7 +717,7 @@ export function DashboardView({
 
       <RecurringFailureList items={snapshot.recurringClientFailures} />
 
-      <AiSummaryPanel />
+      <AiSummaryPanel reports={snapshot.reports} />
 
       <div id="section-open-reports">
         <SectionShell

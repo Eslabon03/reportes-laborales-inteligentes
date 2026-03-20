@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AIConversationPanel } from "@/components/ai-conversation-panel";
 import { ChatHistoryModal } from "@/components/chat-history-modal";
 import { SectionShell } from "@/components/section-shell";
 import { StatusPill } from "@/components/status-pill";
 import type { AiPriority, AiSummary } from "@/lib/ai-analysis";
+import { formatDisplayDate, getStatusTone, type WorkReport } from "@/lib/reports";
 
 type AiHistoryItem = {
   id: number;
@@ -14,6 +15,11 @@ type AiHistoryItem = {
   generatedByName: string;
   sourceReportsCount: number;
   summary: AiSummary;
+};
+
+type RecommendationMatch = {
+  recommendation: string;
+  report: WorkReport | null;
 };
 
 const URGENCY_TONE: Record<AiPriority["urgencia"], "rose" | "amber" | "teal"> = {
@@ -27,6 +33,163 @@ const URGENCY_LABEL: Record<AiPriority["urgencia"], string> = {
   media: "Media",
   baja: "Baja",
 };
+
+const QUOTE_RECOMMENDATION_PATTERN = /(cotiz|presupuest|precio|propuesta)/;
+const INVOICE_RECOMMENDATION_PATTERN = /(factur|cobro|pago|invoice)/;
+const FOLLOWUP_RECOMMENDATION_PATTERN = /(seguimiento|llamar|visita|confirm|revis|coordinar|agendar)/;
+
+const RECOMMENDATION_STOP_WORDS = new Set([
+  "para",
+  "con",
+  "del",
+  "los",
+  "las",
+  "una",
+  "uno",
+  "unos",
+  "unas",
+  "que",
+  "por",
+  "como",
+  "esta",
+  "este",
+  "estos",
+  "estas",
+  "debe",
+  "deben",
+  "sobre",
+  "equipo",
+  "cliente",
+  "clientes",
+]);
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeRecommendation(value: string): string[] {
+  return normalizeText(value)
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4 && !RECOMMENDATION_STOP_WORDS.has(token));
+}
+
+function chooseReportForRecommendation(
+  recommendation: string,
+  reports: WorkReport[],
+): WorkReport | null {
+  if (reports.length === 0) {
+    return null;
+  }
+
+  const recommendationText = normalizeText(recommendation);
+  const recommendationTokens = tokenizeRecommendation(recommendation);
+
+  const scored = reports
+    .map((report) => {
+      const reportText = normalizeText(
+        [
+          report.clientName,
+          report.site,
+          report.employeeName,
+          report.summary,
+          report.tasksPerformed,
+          report.pendingActions,
+          report.failureType,
+        ].join(" "),
+      );
+
+      let score = 0;
+
+      const normalizedClient = normalizeText(report.clientName);
+      const normalizedSite = normalizeText(report.site);
+
+      if (normalizedClient && recommendationText.includes(normalizedClient)) {
+        score += 80;
+      }
+
+      if (normalizedSite && recommendationText.includes(normalizedSite)) {
+        score += 35;
+      }
+
+      for (const token of recommendationTokens) {
+        if (reportText.includes(token)) {
+          score += 4;
+        }
+      }
+
+      if (
+        QUOTE_RECOMMENDATION_PATTERN.test(recommendationText)
+        && report.requiresQuote
+      ) {
+        score += 25;
+      }
+
+      if (
+        INVOICE_RECOMMENDATION_PATTERN.test(recommendationText)
+        && report.requiresInvoice
+      ) {
+        score += 25;
+      }
+
+      if (
+        FOLLOWUP_RECOMMENDATION_PATTERN.test(recommendationText)
+        && report.followUpRequired
+      ) {
+        score += 20;
+      }
+
+      if (report.status !== "resuelto") {
+        score += 2;
+      }
+
+      return { report, score };
+    })
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return right.report.serviceDate.localeCompare(left.report.serviceDate);
+    });
+
+  const bestMatch = scored[0];
+
+  if (bestMatch && bestMatch.score >= 6) {
+    return bestMatch.report;
+  }
+
+  if (QUOTE_RECOMMENDATION_PATTERN.test(recommendationText)) {
+    return (
+      reports.find((report) => report.status !== "resuelto" && report.requiresQuote)
+      ?? bestMatch?.report
+      ?? null
+    );
+  }
+
+  if (INVOICE_RECOMMENDATION_PATTERN.test(recommendationText)) {
+    return (
+      reports.find((report) => report.status !== "resuelto" && report.requiresInvoice)
+      ?? bestMatch?.report
+      ?? null
+    );
+  }
+
+  if (FOLLOWUP_RECOMMENDATION_PATTERN.test(recommendationText)) {
+    return (
+      reports.find((report) => report.status !== "resuelto" && report.followUpRequired)
+      ?? bestMatch?.report
+      ?? null
+    );
+  }
+
+  return reports.find((report) => report.status !== "resuelto") ?? bestMatch?.report ?? null;
+}
 
 function formatTimestamp(value: string): string {
   const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
@@ -45,7 +208,15 @@ function formatTimestamp(value: string): string {
   return `${day} ${month} ${year} · ${hours}:${mins}`;
 }
 
-function AnalysisContent({ summary }: { summary: AiSummary }) {
+function AnalysisContent({
+  summary,
+  recommendationMatches,
+  onRecommendationClick,
+}: {
+  summary: AiSummary;
+  recommendationMatches: RecommendationMatch[];
+  onRecommendationClick: (match: RecommendationMatch) => void;
+}) {
   return (
     <div className="space-y-5">
       <div className="rounded-[24px] border border-slate-900/10 bg-slate-950 p-5 text-white">
@@ -85,17 +256,29 @@ function AnalysisContent({ summary }: { summary: AiSummary }) {
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
               Acciones recomendadas
             </h3>
-            {summary.recomendaciones.length === 0 ? (
+            {recommendationMatches.length === 0 ? (
               <p className="text-sm text-slate-400">Sin recomendaciones adicionales.</p>
             ) : (
               <ul className="space-y-2">
-                {summary.recomendaciones.map((recommendation, index) => (
+                {recommendationMatches.map((match, index) => (
                   <li
-                    key={`${recommendation}-${index}`}
-                    className="flex gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
+                    key={`${match.recommendation}-${index}`}
                   >
-                    <span className="mt-0.5 shrink-0 text-emerald-500">✓</span>
-                    {recommendation}
+                    <button
+                      type="button"
+                      onClick={() => onRecommendationClick(match)}
+                      className="flex w-full gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-left text-sm text-emerald-900 transition hover:bg-emerald-100"
+                    >
+                      <span className="mt-0.5 shrink-0 text-emerald-500">✓</span>
+                      <span>
+                        <span>{match.recommendation}</span>
+                        {match.report ? (
+                          <span className="mt-1 block text-xs font-semibold uppercase tracking-[0.12em] text-emerald-800">
+                            Ver reporte: {match.report.clientName}
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -126,16 +309,49 @@ function AnalysisContent({ summary }: { summary: AiSummary }) {
   );
 }
 
-export function AiSummaryPanel() {
+export function AiSummaryPanel({ reports = [] }: { reports?: WorkReport[] }) {
   const [history, setHistory] = useState<AiHistoryItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [selectedRecommendationReport, setSelectedRecommendationReport] = useState<WorkReport | null>(null);
+  const recommendationContextRef = useRef<HTMLDivElement>(null);
 
   const selectedAnalysis = history.find((item) => item.id === selectedId) ?? history[0] ?? null;
   const selectedAnalysisId = selectedAnalysis?.id ?? null;
+
+  const recommendationMatches = useMemo(() => {
+    if (!selectedAnalysis) {
+      return [] as RecommendationMatch[];
+    }
+
+    return selectedAnalysis.summary.recomendaciones.map((recommendation) => ({
+      recommendation,
+      report: chooseReportForRecommendation(recommendation, reports),
+    }));
+  }, [selectedAnalysis, reports]);
+
+  useEffect(() => {
+    const firstMatchedReport = recommendationMatches.find((item) => item.report)?.report ?? null;
+    setSelectedRecommendationReport(firstMatchedReport);
+  }, [recommendationMatches]);
+
+  const handleRecommendationClick = useCallback((match: RecommendationMatch) => {
+    if (!match.report) {
+      return;
+    }
+
+    setSelectedRecommendationReport(match.report);
+
+    window.requestAnimationFrame(() => {
+      recommendationContextRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, []);
 
   const loadHistory = useCallback(async () => {
     setIsLoadingHistory(true);
@@ -273,7 +489,60 @@ export function AiSummaryPanel() {
 
           {!isLoadingHistory && selectedAnalysis && (
             <div className="space-y-5">
-              <AnalysisContent summary={selectedAnalysis.summary} />
+              <AnalysisContent
+                summary={selectedAnalysis.summary}
+                recommendationMatches={recommendationMatches}
+                onRecommendationClick={handleRecommendationClick}
+              />
+
+              {selectedRecommendationReport ? (
+                <div
+                  ref={recommendationContextRef}
+                  className="rounded-[24px] border border-slate-900/10 bg-slate-50/90 p-5"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                        Contexto del reporte relacionado
+                      </p>
+                      <h3 className="mt-2 text-lg font-semibold text-slate-950">
+                        {selectedRecommendationReport.clientName}
+                      </h3>
+                    </div>
+                    <StatusPill tone={getStatusTone(selectedRecommendationReport.status)}>
+                      {selectedRecommendationReport.status}
+                    </StatusPill>
+                  </div>
+
+                  <p className="mt-3 text-sm text-slate-700">
+                    Enviado por <span className="font-semibold">{selectedRecommendationReport.employeeName}</span> en {selectedRecommendationReport.site}
+                  </p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">
+                    {formatDisplayDate(selectedRecommendationReport.serviceDate)}
+                  </p>
+
+                  <div className="mt-4 space-y-3 text-sm leading-7 text-slate-700">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Resumen
+                      </p>
+                      <p className="mt-1">{selectedRecommendationReport.summary}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Trabajo realizado
+                      </p>
+                      <p className="mt-1">{selectedRecommendationReport.tasksPerformed}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Pendiente actual
+                      </p>
+                      <p className="mt-1">{selectedRecommendationReport.pendingActions}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               {selectedAnalysisId && (
                 <AIConversationPanel
