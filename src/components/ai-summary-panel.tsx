@@ -278,7 +278,6 @@ export function AiSummaryPanel() {
               {selectedAnalysisId && (
                 <AIConversationPanel
                   analysisId={selectedAnalysisId}
-                  summary={selectedAnalysis.summary}
                   onHistoryClick={() => setIsHistoryModalOpen(true)}
                 />
               )}
