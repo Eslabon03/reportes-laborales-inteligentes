@@ -20,6 +20,14 @@ type ReportFormProps = {
   currentUser: SessionUser;
 };
 
+const QUICK_MODE_DEFAULT_CLIENT = "Área administrativa";
+const QUICK_MODE_DEFAULT_SITE = "Gestión administrativa";
+const QUICK_MODE_DEFAULT_SUMMARY = "Registro administrativo";
+
+const QUICK_MODE_QUOTE_PATTERN = /(cotiz|presupuest|quote|precio|propuesta)/i;
+const QUICK_MODE_INVOICE_PATTERN = /(factur|cobro|invoice|pago|orden de compra)/i;
+const QUICK_MODE_FOLLOWUP_PATTERN = /(seguimiento|llamar|visita|agendar|confirmar|revisar|pendiente)/i;
+
 function buildInitialForm(employeeName: string): WorkReportInput {
   return {
     employeeName,
@@ -37,15 +45,59 @@ function buildInitialForm(employeeName: string): WorkReportInput {
   };
 }
 
+function inferAdministrativeFlags(sourceText: string): Pick<
+  WorkReportInput,
+  "requiresQuote" | "requiresInvoice" | "followUpRequired"
+> {
+  const normalized = sourceText.trim();
+
+  const requiresQuote = QUICK_MODE_QUOTE_PATTERN.test(normalized);
+  const requiresInvoice = QUICK_MODE_INVOICE_PATTERN.test(normalized);
+  const followUpRequired =
+    QUICK_MODE_FOLLOWUP_PATTERN.test(normalized)
+    || (!requiresQuote && !requiresInvoice);
+
+  return {
+    requiresQuote,
+    requiresInvoice,
+    followUpRequired,
+  };
+}
+
+function buildAdministrativeQuickPayload(form: WorkReportInput): WorkReportInput {
+  const tasksPerformed = form.tasksPerformed.trim();
+  const pendingActions = form.pendingActions.trim();
+  const contextText = `${tasksPerformed} ${pendingActions}`.trim();
+  const inferredFlags = inferAdministrativeFlags(contextText);
+
+  return {
+    ...form,
+    clientName: form.clientName.trim() || QUICK_MODE_DEFAULT_CLIENT,
+    site: form.site.trim() || QUICK_MODE_DEFAULT_SITE,
+    serviceDate: form.serviceDate || new Date().toISOString().slice(0, 10),
+    summary: form.summary.trim() || contextText || QUICK_MODE_DEFAULT_SUMMARY,
+    status: "abierto",
+    requiresQuote: inferredFlags.requiresQuote,
+    requiresInvoice: inferredFlags.requiresInvoice,
+    followUpRequired: inferredFlags.followUpRequired,
+    failureType: form.failureType.trim(),
+  };
+}
+
 export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
   const [form, setForm] = useState<WorkReportInput>(
     buildInitialForm(currentUser.name),
   );
+  const [isAdministrativeQuickMode, setIsAdministrativeQuickMode] = useState(false);
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  const canUseAdministrativeQuickMode = currentUser.role === "admin";
+  const isAdministrativeModeEnabled =
+    canUseAdministrativeQuickMode && isAdministrativeQuickMode;
 
   const clientOptions = [...new Set(snapshot.reports.map((report) => report.clientName))].slice(0, 8);
 
@@ -61,16 +113,31 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!form.tasksPerformed.trim() || !form.pendingActions.trim()) {
+      setError("Debes completar Trabajo realizado y Pendientes o siguiente acción.");
+      setFeedback(null);
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     setFeedback(null);
 
     try {
-      const nextSnapshot = await submitWorkReport(form);
+      const payload = isAdministrativeModeEnabled
+        ? buildAdministrativeQuickPayload(form)
+        : form;
+
+      const nextSnapshot = await submitWorkReport(payload);
 
       startTransition(() => {
         setSnapshot(nextSnapshot);
-        setFeedback("Reporte enviado y agregado al analisis operativo.");
+        setFeedback(
+          isAdministrativeModeEnabled
+            ? "Reporte administrativo enviado y agregado al analisis operativo."
+            : "Reporte enviado y agregado al analisis operativo.",
+        );
         setForm(buildInitialForm(currentUser.name));
       });
     } catch (submissionError) {
@@ -106,6 +173,45 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
             </p>
           </div>
 
+          {canUseAdministrativeQuickMode ? (
+            <div className="rounded-[24px] border border-slate-900/10 bg-slate-50/90 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Modo de captura
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAdministrativeQuickMode(false)}
+                  className={[
+                    "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition",
+                    !isAdministrativeModeEnabled
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-300 bg-white text-slate-700 hover:border-slate-900",
+                  ].join(" ")}
+                >
+                  Técnico (completo)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAdministrativeQuickMode(true)}
+                  className={[
+                    "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition",
+                    isAdministrativeModeEnabled
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-300 bg-white text-slate-700 hover:border-slate-900",
+                  ].join(" ")}
+                >
+                  Administrativo (rápido)
+                </button>
+              </div>
+              <p className="mt-3 text-sm text-slate-600">
+                {isAdministrativeModeEnabled
+                  ? "Solo se capturan Trabajo realizado y Pendientes o siguiente acción."
+                  : "Modo completo para técnicos: captura todos los campos del reporte."}
+              </p>
+            </div>
+          ) : null}
+
           <div className="grid gap-5 md:grid-cols-2">
             <label className="grid gap-2 text-sm font-medium text-slate-700">
               Cliente
@@ -113,7 +219,8 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
                 list="client-options"
                 value={form.clientName}
                 onChange={(event) => updateField("clientName", event.target.value)}
-                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950"
+                disabled={isAdministrativeModeEnabled}
+                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="Nombre del cliente"
               />
             </label>
@@ -123,7 +230,8 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
               <input
                 value={form.site}
                 onChange={(event) => updateField("site", event.target.value)}
-                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950"
+                disabled={isAdministrativeModeEnabled}
+                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="Ciudad o planta"
               />
             </label>
@@ -134,7 +242,8 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
                 type="date"
                 value={form.serviceDate}
                 onChange={(event) => updateField("serviceDate", event.target.value)}
-                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950"
+                disabled={isAdministrativeModeEnabled}
+                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
               />
             </label>
           </div>
@@ -144,7 +253,8 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
             <textarea
               value={form.summary}
               onChange={(event) => updateField("summary", event.target.value)}
-              className="min-h-28 rounded-3xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950"
+              disabled={isAdministrativeModeEnabled}
+              className="min-h-28 rounded-3xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
               placeholder="Describe la falla, el contexto del cliente o el resultado de la visita."
             />
           </label>
@@ -156,7 +266,11 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
                 value={form.tasksPerformed}
                 onChange={(event) => updateField("tasksPerformed", event.target.value)}
                 className="min-h-28 rounded-3xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950"
-                placeholder="Que hizo el tecnico durante la visita."
+                placeholder={
+                  isAdministrativeModeEnabled
+                    ? "Describe la gestión o acción administrativa realizada."
+                    : "Que hizo el tecnico durante la visita."
+                }
               />
             </label>
 
@@ -166,7 +280,11 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
                 value={form.pendingActions}
                 onChange={(event) => updateField("pendingActions", event.target.value)}
                 className="min-h-28 rounded-3xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950"
-                placeholder="Que falta: cotizar, facturar, llamar, regresar, confirmar."
+                placeholder={
+                  isAdministrativeModeEnabled
+                    ? "Indica la siguiente acción administrativa o pendiente operativo."
+                    : "Que falta: cotizar, facturar, llamar, regresar, confirmar."
+                }
               />
             </label>
           </div>
@@ -177,7 +295,8 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
               <input
                 value={form.failureType}
                 onChange={(event) => updateField("failureType", event.target.value)}
-                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950"
+                disabled={isAdministrativeModeEnabled}
+                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="Ejemplo: sensor, fuga, motor"
               />
             </label>
@@ -192,7 +311,8 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
                     event.target.value as WorkReportInput["status"],
                   )
                 }
-                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950"
+                disabled={isAdministrativeModeEnabled}
+                className="rounded-2xl border border-slate-900/10 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="abierto">abierto</option>
                 <option value="en-proceso">en-proceso</option>
@@ -206,6 +326,7 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
               <input
                 type="checkbox"
                 checked={form.requiresQuote}
+                disabled={isAdministrativeModeEnabled}
                 onChange={(event) => updateField("requiresQuote", event.target.checked)}
               />
               Pendiente de cotizacion
@@ -214,6 +335,7 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
               <input
                 type="checkbox"
                 checked={form.requiresInvoice}
+                disabled={isAdministrativeModeEnabled}
                 onChange={(event) => updateField("requiresInvoice", event.target.checked)}
               />
               Pendiente de facturacion
@@ -222,6 +344,7 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
               <input
                 type="checkbox"
                 checked={form.followUpRequired}
+                disabled={isAdministrativeModeEnabled}
                 onChange={(event) =>
                   updateField("followUpRequired", event.target.checked)
                 }
