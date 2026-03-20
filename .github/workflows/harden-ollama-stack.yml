@@ -7,6 +7,10 @@ on:
         description: VPS publica donde corre Ollama
         required: false
         default: "72.62.169.135"
+      vps_port:
+        description: Puerto SSH del VPS
+        required: false
+        default: "22"
       vps_user:
         description: Usuario SSH
         required: false
@@ -26,6 +30,7 @@ jobs:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       RENDER_SERVICE_ID: srv-d6tg9i7diees73curoc0
       VPS_HOST: ${{ inputs.vps_host }}
+      VPS_PORT: ${{ inputs.vps_port }}
       VPS_USER: ${{ inputs.vps_user }}
       OLLAMA_MODEL: ${{ inputs.ollama_model }}
       VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -67,18 +72,44 @@ jobs:
       - name: Trust VPS host
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Preflight SSH connectivity
+        shell: bash
+        run: |
+          set +e
+          if [ -n "$VPS_SSH_KEY" ]; then
+            PRECHECK=$(ssh -i ~/.ssh/id_vps_workflow -o IdentitiesOnly=yes -o ConnectTimeout=20 -o BatchMode=yes -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" 'echo SSH_OK' 2>&1)
+            STATUS=$?
+          else
+            PRECHECK=$(sshpass -p "$VPS_SSH_PASSWORD" ssh -o ConnectTimeout=20 -o PreferredAuthentications=keyboard-interactive,password -o KbdInteractiveAuthentication=yes -o PasswordAuthentication=yes -o PubkeyAuthentication=no -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" 'echo SSH_OK' 2>&1)
+            STATUS=$?
+          fi
+          set -e
+          echo "$PRECHECK"
+          if [ $STATUS -ne 0 ]; then
+            echo "Fallo preflight SSH (host=$VPS_HOST port=$VPS_PORT user=$VPS_USER)."
+            exit $STATUS
+          fi
 
       - name: Harden VPS proxy
         id: harden
         shell: bash
         run: |
+          set +e
           if [ -n "$VPS_SSH_KEY" ]; then
-            OUTPUT=$(PUBLIC_HOST="$VPS_HOST" OLLAMA_MODEL="$OLLAMA_MODEL" ssh -i ~/.ssh/id_vps_workflow -o IdentitiesOnly=yes "$VPS_USER@$VPS_HOST" 'bash -s --' < scripts/harden-ollama-proxy.sh)
+            OUTPUT=$(PUBLIC_HOST="$VPS_HOST" OLLAMA_MODEL="$OLLAMA_MODEL" ssh -i ~/.ssh/id_vps_workflow -o IdentitiesOnly=yes -o ConnectTimeout=20 -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" 'bash -s --' < scripts/harden-ollama-proxy.sh 2>&1)
+            STATUS=$?
           else
-            OUTPUT=$(PUBLIC_HOST="$VPS_HOST" OLLAMA_MODEL="$OLLAMA_MODEL" sshpass -p "$VPS_SSH_PASSWORD" ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no "$VPS_USER@$VPS_HOST" 'bash -s --' < scripts/harden-ollama-proxy.sh)
+            OUTPUT=$(PUBLIC_HOST="$VPS_HOST" OLLAMA_MODEL="$OLLAMA_MODEL" sshpass -p "$VPS_SSH_PASSWORD" ssh -o ConnectTimeout=20 -o PreferredAuthentications=keyboard-interactive,password -o KbdInteractiveAuthentication=yes -o PasswordAuthentication=yes -o PubkeyAuthentication=no -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" 'bash -s --' < scripts/harden-ollama-proxy.sh 2>&1)
+            STATUS=$?
           fi
+          set -e
           echo "$OUTPUT"
+          if [ $STATUS -ne 0 ]; then
+            echo "Hardening remoto fallo (status=$STATUS)."
+            exit $STATUS
+          fi
           JSON_LINE=$(echo "$OUTPUT" | tail -n 1)
           {
             echo 'json<<EOF'
