@@ -122,6 +122,51 @@ function collectSearchText(report: WorkReport | WorkReportInput): string {
     .toLowerCase();
 }
 
+function splitReasonCandidates(value: string): string[] {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  if (!normalized) {
+    return [];
+  }
+
+  const parts = normalized
+    .split(/[.!?;\n]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts : [normalized];
+}
+
+function formatReason(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.length > 140
+    ? `${normalized.slice(0, 137)}...`
+    : normalized;
+}
+
+function isLowSignalReason(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+
+  if (!normalized) {
+    return true;
+  }
+
+  const words = normalized.split(/\s+/).length;
+
+  if (normalized.length < 8 || words < 2) {
+    return true;
+  }
+
+  return /^(n\/a|na|no aplica|sin pendiente|ninguno|ninguna|ok|completado|resuelto|detectado en el reporte|pendiente|seguimiento)$/i.test(
+    normalized,
+  );
+}
+
 function extractReasonFromReport(
   report: WorkReport | WorkReportInput,
   pattern: RegExp,
@@ -134,22 +179,45 @@ function extractReasonFromReport(
     report.failureType,
   ];
 
+  let fallbackReason: string | null = null;
+
   for (const field of fields) {
-    if (!field || !pattern.test(field)) {
+    if (!field) {
       continue;
     }
 
-    // Extrae la primera oración/frase que contiene la palabra clave
-    const sentences = field.match(/[^.!?]*[.!?]+/g) || [field];
-    const matching = sentences.find((s) => pattern.test(s));
+    const candidates = splitReasonCandidates(field);
 
-    if (matching) {
-      const extracted = matching.trim();
-      return extracted.length > 120 ? `${extracted.slice(0, 117)}...` : extracted;
+    for (const candidate of candidates) {
+      const formattedCandidate = formatReason(candidate);
+
+      if (!formattedCandidate || isLowSignalReason(formattedCandidate)) {
+        continue;
+      }
+
+      if (!fallbackReason) {
+        fallbackReason = formattedCandidate;
+      }
+
+      if (pattern.test(candidate)) {
+        return formattedCandidate;
+      }
+    }
+
+    if (pattern.test(field)) {
+      const formattedField = formatReason(field);
+
+      if (formattedField && !isLowSignalReason(formattedField)) {
+        return formattedField;
+      }
     }
   }
 
-  return "Detectado en el reporte";
+  if (fallbackReason) {
+    return fallbackReason;
+  }
+
+  return "Pendiente reportado por el tecnico";
 }
 
 function buildPendingItem(report: WorkReport, reason: string): PendingItem {
