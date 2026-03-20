@@ -101,9 +101,16 @@ server {
 }
 EOF
 
+# Evita conflictos cuando el sitio default de nginx intenta bindear 80/443
+rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-available/default
+
 nginx -t
-systemctl enable --now nginx
-systemctl restart nginx
+systemctl enable nginx || true
+if ! systemctl restart nginx; then
+  systemctl status nginx.service --no-pager || true
+  journalctl -xeu nginx.service --no-pager | tail -n 80 || true
+  exit 1
+fi
 
 ufw allow OpenSSH
 ufw allow "${PROXY_PORT}/tcp"
