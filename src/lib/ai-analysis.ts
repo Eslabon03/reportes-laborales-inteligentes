@@ -48,10 +48,19 @@ Reglas:
 - Responde SOLO en español
 - Responde SOLO con el JSON, sin texto antes ni después`;
 
-const QA_SYSTEM_PROMPT = `Eres un asistente que responde preguntas sobre un análisis operativo ya generado.
-Solo puedes usar la información incluida en el contexto del análisis proporcionado.
-Si la pregunta pide datos que no aparecen en ese análisis, responde claramente que no está en el análisis actual.
-Responde en español, de forma breve, concreta y accionable.`;
+const QA_SYSTEM_PROMPT = `Eres un asistente operativo que responde preguntas sobre reportes de trabajo.
+Recibirás dos contextos: (1) resumen IA y (2) reportes concretos.
+Reglas:
+- Prioriza evidencia de los reportes concretos para responder preguntas específicas (quién, cuándo, cliente, sitio, pendientes).
+- Usa el resumen IA para complementar, no para reemplazar evidencia.
+- Si faltan datos para responder con certeza, dilo explícitamente y sugiere la siguiente acción.
+- Responde en español, breve, concreta y accionable.`;
+
+const QA_REPORT_LIMIT = 80;
+const QA_TEXT_MAX_LENGTH = 180;
+
+const DELIVERY_ISSUE_PATTERN =
+	/(no se envio producto|no se entrego producto|producto pendiente|pendiente de entrega|sin entrega de producto|no recibio producto|entrega pendiente de producto|producto no enviado)/i;
 
 function buildReportSummary(reports: WorkReport[]): string {
 	const activeReports = reports
@@ -156,6 +165,147 @@ function buildSummaryContext(summary: AiSummary): string {
 	return JSON.stringify(summary, null, 2);
 }
 
+function normalizeForMatch(value: string): string {
+	return value
+		.toLowerCase()
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/g, "");
+}
+
+function truncateText(value: string, maxLength = QA_TEXT_MAX_LENGTH): string {
+	const clean = value.replace(/\s+/g, " ").trim();
+
+	if (clean.length <= maxLength) {
+		return clean;
+	}
+
+	return `${clean.slice(0, maxLength - 1)}…`;
+}
+
+function buildReportsContext(reports: WorkReport[]): string {
+	if (reports.length === 0) {
+		return "No hay reportes disponibles para contexto adicional.";
+	}
+
+	const scopedReports = reports.slice(0, QA_REPORT_LIMIT);
+
+	const lines = scopedReports.map((report, index) => {
+		return [
+			`${index + 1}) Cliente: ${report.clientName}`,
+			`Fecha: ${report.serviceDate}`,
+			`Sitio: ${report.site}`,
+			`Estado: ${report.status}`,
+			`Pendiente: ${truncateText(report.pendingActions)}`,
+			`Resumen: ${truncateText(report.summary)}`,
+			`Tareas: ${truncateText(report.tasksPerformed)}`,
+			report.followUpRequired ? "Seguimiento: sí" : "Seguimiento: no",
+		].join(" | ");
+	});
+
+	return `Reportes de contexto (${scopedReports.length} de ${reports.length}):\n${lines.join("\n")}`;
+}
+
+function getYesterdayIsoCandidates(): string[] {
+	const now = new Date();
+
+	const localYesterday = new Date(now);
+	localYesterday.setDate(localYesterday.getDate() - 1);
+
+	const utcYesterday = new Date(
+		Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
+	);
+
+	return Array.from(
+		new Set([
+			localYesterday.toISOString().slice(0, 10),
+			utcYesterday.toISOString().slice(0, 10),
+		]),
+	);
+}
+
+function hasDeliveryIssue(report: WorkReport): boolean {
+	const text = normalizeForMatch(
+		[
+			report.pendingActions,
+			report.summary,
+			report.tasksPerformed,
+			report.failureType,
+		].join(" "),
+	);
+
+	return DELIVERY_ISSUE_PATTERN.test(text);
+}
+
+function deliveryIssueSnippet(report: WorkReport): string {
+	const fields = [report.pendingActions, report.summary, report.tasksPerformed];
+
+	for (const field of fields) {
+		const clean = field.trim();
+
+		if (!clean) {
+			continue;
+		}
+
+		if (DELIVERY_ISSUE_PATTERN.test(normalizeForMatch(clean))) {
+			return truncateText(clean, 140);
+		}
+	}
+
+	return truncateText(report.pendingActions || report.summary || "Sin detalle", 140);
+}
+
+function tryHeuristicAnswer(
+	question: string,
+	reports: WorkReport[],
+): string | null {
+	if (reports.length === 0) {
+		return null;
+	}
+
+	const normalizedQuestion = normalizeForMatch(question);
+	const asksAboutProductDelivery =
+		normalizedQuestion.includes("producto") &&
+		/(envio|entrego|entrega|recibio|recibieron|recibir)/.test(
+			normalizedQuestion,
+		);
+
+	const asksAboutYesterday = normalizedQuestion.includes("ayer");
+
+	if (!asksAboutProductDelivery || !asksAboutYesterday) {
+		return null;
+	}
+
+	const yesterdayCandidates = getYesterdayIsoCandidates();
+	const yesterdayReports = reports.filter((report) =>
+		yesterdayCandidates.includes(report.serviceDate),
+	);
+
+	if (yesterdayReports.length === 0) {
+		return "No encontré reportes con fecha de ayer para validar esa entrega. Recomendación: registra o revisa reportes de ayer con estado y pendiente actualizados.";
+	}
+
+	const impacted = yesterdayReports.filter(hasDeliveryIssue);
+
+	if (impacted.length === 0) {
+		return "Revisé los reportes de ayer y no encontré evidencia explícita de producto no enviado. Si deseas, puedo listar los pendientes de ayer por cliente para confirmarlo.";
+	}
+
+	const visible = impacted.slice(0, 8);
+	const dates = Array.from(new Set(impacted.map((report) => report.serviceDate))).sort();
+
+	const lines = visible.map(
+		(report, index) =>
+			`${index + 1}. ${report.clientName} (${report.site}) — ${deliveryIssueSnippet(report)}`,
+	);
+
+	const extra =
+		impacted.length > visible.length
+			? `\nHay ${impacted.length - visible.length} casos adicionales en los reportes.`
+			: "";
+
+	return `Según los reportes de ayer (${dates.join(", ")}), los casos con posible producto no enviado son:\n${lines.join("\n")}${extra}\nSiguiente paso recomendado: confirmar con logística y actualizar el estado del pendiente por cliente.`;
+}
+
 export async function generateAiSummary(
 	reports: WorkReport[],
 ): Promise<AiSummary> {
@@ -182,6 +332,7 @@ export async function generateAiSummary(
 export async function answerQuestionAboutSummary(
 	summary: AiSummary,
 	question: string,
+	reports: WorkReport[] = [],
 ): Promise<string> {
 	const cleanQuestion = question.trim();
 
@@ -189,7 +340,14 @@ export async function answerQuestionAboutSummary(
 		throw new Error("La pregunta no puede estar vacía.");
 	}
 
+	const heuristicAnswer = tryHeuristicAnswer(cleanQuestion, reports);
+
+	if (heuristicAnswer) {
+		return heuristicAnswer;
+	}
+
 	const ollama = new Ollama({ host: OLLAMA_HOST, fetch: makeFetch() });
+	const reportsContext = buildReportsContext(reports);
 
 	const response = await ollama.chat({
 		model: OLLAMA_MODEL,
@@ -198,7 +356,7 @@ export async function answerQuestionAboutSummary(
 			{ role: "system", content: QA_SYSTEM_PROMPT },
 			{
 				role: "user",
-				content: `Contexto del análisis:\n${buildSummaryContext(summary)}\n\nPregunta:\n${cleanQuestion}`,
+				content: `Contexto del análisis:\n${buildSummaryContext(summary)}\n\n${reportsContext}\n\nPregunta:\n${cleanQuestion}`,
 			},
 		],
 	});

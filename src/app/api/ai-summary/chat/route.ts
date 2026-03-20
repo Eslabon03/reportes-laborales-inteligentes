@@ -9,6 +9,7 @@ import {
   deleteAiAnalysisChatMessagesByAnalysisId,
   getAiAnalysisHistoryEntryById,
   listAiAnalysisChatMessagesByAnalysisId,
+  listWorkReports,
   saveAiAnalysisChatMessageEntry,
   type AiAnalysisChatMessageEntry,
 } from "@/lib/db";
@@ -226,7 +227,18 @@ export async function POST(request: Request) {
       content: question,
     });
 
-    const answer = await answerQuestionAboutSummary(summary, question);
+    const reports = listWorkReports();
+    const contextLimit = Math.min(
+      Math.max(entry.sourceReportsCount + 20, 20),
+      80,
+    );
+    const reportContext = reports.slice(0, contextLimit);
+
+    const answer = await answerQuestionAboutSummary(
+      summary,
+      question,
+      reportContext,
+    );
 
     saveAiAnalysisChatMessageEntry({
       analysisId: rawId,
