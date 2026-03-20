@@ -54,10 +54,11 @@ Reglas:
 - Prioriza evidencia de los reportes concretos para responder preguntas específicas (quién, cuándo, cliente, sitio, pendientes).
 - Usa el resumen IA para complementar, no para reemplazar evidencia.
 - Si faltan datos para responder con certeza, dilo explícitamente y sugiere la siguiente acción.
-- Responde en español, breve, concreta y accionable.`;
+- Responde en español, **breve y conciso** (máximo 3-4 oraciones cortas).
+- Si es una lista, usa viñetas breves, no párrafos.`;
 
-const QA_REPORT_LIMIT = 80;
-const QA_TEXT_MAX_LENGTH = 180;
+export const QA_REPORT_LIMIT = 40; // Reducido de 80 para respuestas más rápidas
+export const QA_TEXT_MAX_LENGTH = 140; // Reducido para contexto más compacto
 
 const DELIVERY_ISSUE_PATTERN =
 	/(no se envio producto|no se entrego producto|producto pendiente|pendiente de entrega|sin entrega de producto|no recibio producto|entrega pendiente de producto|producto no enviado)/i;
@@ -161,7 +162,7 @@ function makeFetch(): typeof fetch {
 	};
 }
 
-function buildSummaryContext(summary: AiSummary): string {
+export function buildSummaryContext(summary: AiSummary): string {
 	return JSON.stringify(summary, null, 2);
 }
 
@@ -182,7 +183,7 @@ function truncateText(value: string, maxLength = QA_TEXT_MAX_LENGTH): string {
 	return `${clean.slice(0, maxLength - 1)}…`;
 }
 
-function buildReportsContext(reports: WorkReport[]): string {
+export function buildReportsContext(reports: WorkReport[]): string {
 	if (reports.length === 0) {
 		return "No hay reportes disponibles para contexto adicional.";
 	}
@@ -254,7 +255,7 @@ function deliveryIssueSnippet(report: WorkReport): string {
 	return truncateText(report.pendingActions || report.summary || "Sin detalle", 140);
 }
 
-function tryHeuristicAnswer(
+export function tryHeuristicAnswer(
 	question: string,
 	reports: WorkReport[],
 ): string | null {
@@ -334,7 +335,7 @@ export type AiChatMessage = {
 	content: string;
 };
 
-function buildChatHistoryContext(messages: AiChatMessage[]): string {
+export function buildChatHistoryContext(messages: AiChatMessage[]): string {
 	if (messages.length === 0) {
 		return "";
 	}
