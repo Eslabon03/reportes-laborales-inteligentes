@@ -329,10 +329,32 @@ export async function generateAiSummary(
 	return parseAiResponse(response.message.content);
 }
 
+export type AiChatMessage = {
+	role: "user" | "assistant";
+	content: string;
+};
+
+function buildChatHistoryContext(messages: AiChatMessage[]): string {
+	if (messages.length === 0) {
+		return "";
+	}
+
+	const historyLines = messages
+		.slice(-6) // Últimos 6 mensajes (3 rondas de preguntas-respuesta)
+		.map((msg) => {
+			const prefix = msg.role === "user" ? "Pregunta anterior" : "Mi respuesta previa";
+			return `${prefix}:\n${msg.content}`;
+		})
+		.join("\n\n");
+
+	return `Historial de conversación:\n${historyLines}\n\n`;
+}
+
 export async function answerQuestionAboutSummary(
 	summary: AiSummary,
 	question: string,
 	reports: WorkReport[] = [],
+	chatHistory: AiChatMessage[] = [],
 ): Promise<string> {
 	const cleanQuestion = question.trim();
 
@@ -348,6 +370,7 @@ export async function answerQuestionAboutSummary(
 
 	const ollama = new Ollama({ host: OLLAMA_HOST, fetch: makeFetch() });
 	const reportsContext = buildReportsContext(reports);
+	const historyContext = buildChatHistoryContext(chatHistory);
 
 	const response = await ollama.chat({
 		model: OLLAMA_MODEL,
@@ -356,7 +379,7 @@ export async function answerQuestionAboutSummary(
 			{ role: "system", content: QA_SYSTEM_PROMPT },
 			{
 				role: "user",
-				content: `Contexto del análisis:\n${buildSummaryContext(summary)}\n\n${reportsContext}\n\nPregunta:\n${cleanQuestion}`,
+				content: `Contexto del análisis:\n${buildSummaryContext(summary)}\n\n${reportsContext}\n\n${historyContext}Pregunta actual:\n${cleanQuestion}`,
 			},
 		],
 	});

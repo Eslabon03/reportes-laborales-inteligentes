@@ -220,6 +220,13 @@ export async function POST(request: Request) {
   }
 
   try {
+    // Obtener historial anterior antes de guardar el nuevo mensaje
+    const previousMessages = listAiAnalysisChatMessagesByAnalysisId(rawId);
+    const chatHistoryForContext = previousMessages.map((msg) => ({
+      role: msg.role as "user" | "assistant",
+      content: msg.content,
+    }));
+
     saveAiAnalysisChatMessageEntry({
       analysisId: rawId,
       userId: currentUser.id,
@@ -238,6 +245,7 @@ export async function POST(request: Request) {
       summary,
       question,
       reportContext,
+      chatHistoryForContext,
     );
 
     saveAiAnalysisChatMessageEntry({
