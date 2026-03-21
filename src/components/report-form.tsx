@@ -95,7 +95,7 @@ export function ReportForm({ initialSnapshot, currentUser }: ReportFormProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isPending, startTransition] = useTransition();
 
-  const canUseAdministrativeQuickMode = currentUser.role === "admin";
+  const canUseAdministrativeQuickMode = true; // Available to all users (admin + employee)
   const isAdministrativeModeEnabled =
     canUseAdministrativeQuickMode && isAdministrativeQuickMode;
 
