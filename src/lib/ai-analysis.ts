@@ -348,6 +348,68 @@ function buildWhoReportedAnswer(
 	return `Los empleados que enviaron reporte ${dateLabel} (${matchingReports.length} reporte${matchingReports.length !== 1 ? "s" : ""}):\n${list}`;
 }
 
+// ── Busca si la pregunta menciona el nombre de un empleado conocido ──────────
+function findEmployeeInQuestion(
+	normalizedQuestion: string,
+	reports: WorkReport[],
+): string | null {
+	const uniqueNames = Array.from(
+		new Set(reports.map((r) => r.employeeName).filter(Boolean)),
+	);
+
+	for (const name of uniqueNames) {
+		const normalizedName = normalizeForMatch(name);
+		// Nombre completo
+		if (normalizedQuestion.includes(normalizedName)) return name;
+		// Partes individuales (nombre o apellido), mínimo 4 chars para evitar falsos positivos
+		const parts = normalizedName.split(/\s+/).filter((p) => p.length >= 4);
+		if (parts.some((part) => normalizedQuestion.includes(part))) return name;
+	}
+
+	return null;
+}
+
+function buildEmployeeReportsAnswer(
+	employee: string,
+	reports: WorkReport[],
+	dateLabel?: string,
+	dateIsos?: string[],
+): string {
+	let filtered = reports.filter((r) => r.employeeName === employee);
+
+	if (dateIsos && dateIsos.length > 0) {
+		const byDate = filtered.filter((r) => dateIsos.includes(r.serviceDate));
+		if (byDate.length === 0) {
+			return `No encontré reportes de ${employee} para ${dateLabel ?? "esa fecha"}.`;
+		}
+		filtered = byDate;
+	}
+
+	if (filtered.length === 0) {
+		return `No encontré reportes registrados para el empleado ${employee}.`;
+	}
+
+	const shown = filtered.slice(0, 8);
+	const header = dateLabel
+		? `Reportes de ${employee} (${dateLabel}):`
+		: `Reportes de ${employee} (${filtered.length} en total):`;
+
+	const lines = shown.map((r, i) => {
+		let line = `${i + 1}. ${r.serviceDate} — ${r.clientName}`;
+		if (r.site) line += ` | ${r.site}`;
+		line += ` | Estado: ${r.status}`;
+		if (r.pendingActions?.trim()) line += `\n   Pendiente: ${truncateText(r.pendingActions, 100)}`;
+		return line;
+	});
+
+	const extra =
+		filtered.length > shown.length
+			? `\n...y ${filtered.length - shown.length} reporte(s) más.`
+			: "";
+
+	return `${header}\n${lines.join("\n")}${extra}`;
+}
+
 export function tryHeuristicAnswer(
 	question: string,
 	reports: WorkReport[],
@@ -357,6 +419,22 @@ export function tryHeuristicAnswer(
 	}
 
 	const normalizedQuestion = normalizeForMatch(question);
+
+	// ── Empleado por nombre específico ────────────────────────────────────────
+	const matchedEmployee = findEmployeeInQuestion(normalizedQuestion, reports);
+	if (matchedEmployee) {
+		const parsedDate = parseSpanishDate(normalizedQuestion);
+		if (parsedDate) {
+			return buildEmployeeReportsAnswer(matchedEmployee, reports, parsedDate.label, [parsedDate.iso]);
+		}
+		if (normalizedQuestion.includes("hoy")) {
+			return buildEmployeeReportsAnswer(matchedEmployee, reports, "hoy", getTodayIsoCandidates());
+		}
+		if (normalizedQuestion.includes("ayer")) {
+			return buildEmployeeReportsAnswer(matchedEmployee, reports, "ayer", getYesterdayIsoCandidates());
+		}
+		return buildEmployeeReportsAnswer(matchedEmployee, reports);
+	}
 
 	// ── Detección amplia de "¿quién(es)?" ────────────────────────────────────
 	// Cubre: quien, quienes, qué empleado, cuáles empleados, dime los que, etc.
