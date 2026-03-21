@@ -18,6 +18,12 @@ export type AiSummary = {
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:7b";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY?.trim();
+const OLLAMA_FALLBACK_HOST =
+	process.env.OLLAMA_FALLBACK_HOST?.trim() ??
+	(OLLAMA_HOST.includes(":11435")
+		? OLLAMA_HOST.replace(":11435", ":11434")
+		: "");
+const OLLAMA_FALLBACK_API_KEY = process.env.OLLAMA_FALLBACK_API_KEY?.trim();
 
 const SYSTEM_PROMPT = `Eres un asistente de análisis operativo para una empresa de servicios técnicos de campo.
 Se te proporcionará una lista de reportes de trabajo en formato JSON.
@@ -148,12 +154,12 @@ function parseAiResponse(raw: string): AiSummary {
 	return { resumen, prioridades, recomendaciones, riesgos };
 }
 
-function makeFetch(): typeof fetch {
+function makeFetch(apiKey?: string): typeof fetch {
 	return (url: RequestInfo | URL, init?: RequestInit) => {
 		const headers = new Headers(init?.headers);
 
-		if (OLLAMA_API_KEY) {
-			headers.set("Authorization", `Bearer ${OLLAMA_API_KEY}`);
+		if (apiKey) {
+			headers.set("Authorization", `Bearer ${apiKey}`);
 		}
 
 		if (OLLAMA_HOST.includes(".loca.lt")) {
@@ -162,6 +168,47 @@ function makeFetch(): typeof fetch {
 
 		return fetch(url, { ...init, headers });
 	};
+}
+
+function isConnectionError(error: unknown): error is Error {
+	if (!(error instanceof Error)) {
+		return false;
+	}
+
+	return (
+		error.message.includes("ECONNREFUSED") ||
+		error.message.includes("fetch failed") ||
+		error.message.includes("connect") ||
+		error.message.includes("ETIMEDOUT")
+	);
+}
+
+async function chatWithOllamaFailover(
+	request: Parameters<Ollama["chat"]>[0],
+) {
+	const primary = new Ollama({
+		host: OLLAMA_HOST,
+		fetch: makeFetch(OLLAMA_API_KEY),
+	});
+
+	try {
+		return await primary.chat(request);
+	} catch (error) {
+		if (
+			!isConnectionError(error) ||
+			!OLLAMA_FALLBACK_HOST ||
+			OLLAMA_FALLBACK_HOST === OLLAMA_HOST
+		) {
+			throw error;
+		}
+
+		const fallback = new Ollama({
+			host: OLLAMA_FALLBACK_HOST,
+			fetch: makeFetch(OLLAMA_FALLBACK_API_KEY),
+		});
+
+		return fallback.chat(request);
+	}
 }
 
 export function buildSummaryContext(summary: AiSummary): string {
@@ -525,11 +572,9 @@ export function tryHeuristicAnswer(
 export async function generateAiSummary(
 	reports: WorkReport[],
 ): Promise<AiSummary> {
-	const ollama = new Ollama({ host: OLLAMA_HOST, fetch: makeFetch() });
-
 	const userContent = buildReportSummary(reports);
 
-	const response = await ollama.chat({
+	const response = await chatWithOllamaFailover({
 		model: OLLAMA_MODEL,
 		format: "json",
 		options: { temperature: 0.2 },
@@ -584,11 +629,10 @@ export async function answerQuestionAboutSummary(
 		return heuristicAnswer;
 	}
 
-	const ollama = new Ollama({ host: OLLAMA_HOST, fetch: makeFetch() });
 	const reportsContext = buildReportsContext(reports);
 	const historyContext = buildChatHistoryContext(chatHistory);
 
-	const response = await ollama.chat({
+	const response = await chatWithOllamaFailover({
 		model: OLLAMA_MODEL,
 		options: { temperature: 0.2, num_ctx: 4096, num_predict: 300 },
 		messages: [
