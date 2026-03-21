@@ -35,7 +35,8 @@ jobs:
         continue-on-error: true
         env:
           APP_URL: https://reportes-laborales-inteligentes.onrender.com
-          OLLAMA_HOST: http://72.62.169.135:11434
+          OLLAMA_HOST: ${{ vars.OLLAMA_HEALTH_HOST || 'http://72.62.169.135:11435' }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY || '' }}
         run: pnpm check:prod
 
       - name: Open or update incident issue

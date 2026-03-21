@@ -1,5 +1,5 @@
 param(
-    [string]$Host = "72.62.169.135",
+    [string]$VpsHost = "72.62.169.135",
     [string]$User = "root",
     [string]$Model = "llama3.2:latest"
 )
@@ -16,7 +16,7 @@ if (-not $scriptContent.Trim()) {
     throw "El script base está vacío: $scriptPath"
 }
 
-$sshTarget = "$User@$Host"
+$sshTarget = "$User@$VpsHost"
 
 Write-Host "Ejecutando aprovisionamiento de Ollama en $sshTarget..."
 $scriptContent | ssh $sshTarget "bash -s -- '$Model'"

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:reset": "powershell -NoProfile -Command \"Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 1; Remove-Item .next\\dev\\lock -Force -ErrorAction SilentlyContinue; pnpm dev\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

@@ -1,5 +1,5 @@
 param(
-    [string]$Host = "72.62.169.135",
+    [string]$VpsHost = "72.62.169.135",
     [string]$User = "root",
     [string]$Model = "llama3.2:latest",
     [string]$RenderServiceId = "srv-d6tg9i7diees73curoc0"
@@ -16,11 +16,11 @@ if (-not (Test-Path $renderScriptPath)) {
     throw "No se encontró el script de Render: $renderScriptPath"
 }
 
-$sshTarget = "$User@$Host"
+$sshTarget = "$User@$VpsHost"
 $scriptContent = Get-Content $hardenScriptPath -Raw
 
 Write-Host "Aplicando hardening de Ollama en $sshTarget..."
-$output = $scriptContent | ssh $sshTarget "PUBLIC_HOST='$Host' OLLAMA_MODEL='$Model' bash -s --"
+$output = $scriptContent | ssh $sshTarget "PUBLIC_HOST='$VpsHost' OLLAMA_MODEL='$Model' bash -s --"
 $output | ForEach-Object { Write-Host $_ }
 
 $jsonLine = ($output | Select-Object -Last 1)

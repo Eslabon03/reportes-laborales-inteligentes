@@ -97,7 +97,49 @@ Notas:
 - `.github/workflows/rotate-session-secret.yml` rota `SESSION_SECRET` cada mes si configuras `RENDER_API_KEY` como secreto de GitHub.
 - `.github/workflows/harden-ollama-stack.yml` permite endurecer Ollama desde GitHub Actions si configuras `RENDER_API_KEY` y `VPS_SSH_KEY`.
 
+## Instalar Ollama para Render (paso a paso)
+
+Render no ejecuta Ollama dentro del mismo servicio web de este proyecto. El flujo recomendado es:
+
+1. Instalar y proteger Ollama en un VPS Ubuntu (Hostinger, Contabo, etc.).
+2. Conectar Render a ese endpoint externo por variables de entorno.
+
+### Opcion recomendada (Windows, 1 comando)
+
+Desde PowerShell en este proyecto:
+
+```powershell
+$env:RENDER_API_KEY="<tu_api_key_de_render>"
+$env:RENDER_SERVICE_ID="srv-d6tg9i7diees73curoc0" # opcional si usas otro servicio
+powershell -ExecutionPolicy Bypass -File .\scripts\secure-ollama-stack.ps1 -VpsHost "<IP_PUBLICA_VPS>" -User "root" -Model "llama3.2:latest"
+```
+
+Ese comando:
+
+- instala/actualiza Ollama en el VPS,
+- lo deja privado en `127.0.0.1:11434`,
+- publica un proxy con token en `http://<VPS>:11435`,
+- sincroniza `OLLAMA_HOST`, `OLLAMA_API_KEY` y `OLLAMA_MODEL` en Render.
+
+### Opcion manual por pasos
+
+- Instalar Ollama en VPS: `scripts/setup-ollama-vps.ps1`.
+- Aplicar hardening/token: `scripts/harden-ollama-proxy.sh`.
+- Sincronizar Render: `pnpm sync:ollama -- --host <url> --api-key <token> --model <modelo>`.
+
+### Verificacion final
+
+```bash
+APP_URL=https://reportes-laborales-inteligentes.onrender.com \
+OLLAMA_HOST=http://<IP_PUBLICA_VPS>:11435 \
+OLLAMA_API_KEY=<token> \
+pnpm check:prod
+```
+
+Si el check responde `OK ollama-tags`, Render ya puede usar Ollama en produccion.
+
 ### Secretos recomendados en GitHub
 
 - `RENDER_API_KEY`: API key de Render para cambiar variables automaticamente.
 - `VPS_SSH_KEY`: llave privada SSH del VPS para el workflow de hardening.
+- `OLLAMA_API_KEY`: token Bearer del proxy de Ollama para el workflow `production-health.yml`.
