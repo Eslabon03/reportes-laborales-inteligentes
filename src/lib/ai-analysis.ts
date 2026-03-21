@@ -51,6 +51,8 @@ Reglas:
 const QA_SYSTEM_PROMPT = `Eres un asistente operativo que responde preguntas sobre reportes de trabajo.
 Recibirás dos contextos: (1) resumen IA y (2) reportes concretos.
 Reglas:
+- En cada reporte hay dos actores distintos: "Empleado" = la persona de la empresa que realizó y envió el reporte; "Cliente" = la empresa o persona atendida. NUNCA los confundas.
+- Cuando te pregunten "¿quién envió el reporte?" o "¿quiénes enviaron reporte?" responde con los nombres del campo "Empleado", NO con los del campo "Cliente".
 - Prioriza evidencia de los reportes concretos para responder preguntas específicas (quién, cuándo, cliente, sitio, pendientes).
 - Usa el resumen IA para complementar, no para reemplazar evidencia.
 - Si faltan datos para responder con certeza, dilo explícitamente y sugiere la siguiente acción.
@@ -192,7 +194,8 @@ export function buildReportsContext(reports: WorkReport[]): string {
 
 	const lines = scopedReports.map((report, index) => {
 		return [
-			`${index + 1}) Cliente: ${report.clientName}`,
+			`${index + 1}) Empleado: ${report.employeeName}`,
+			`Cliente: ${report.clientName}`,
 			`Fecha: ${report.serviceDate}`,
 			`Sitio: ${report.site}`,
 			`Estado: ${report.status}`,
@@ -204,6 +207,19 @@ export function buildReportsContext(reports: WorkReport[]): string {
 	});
 
 	return `Reportes de contexto (${scopedReports.length} de ${reports.length}):\n${lines.join("\n")}`;
+}
+
+function getTodayIsoCandidates(): string[] {
+	const now = new Date();
+
+	const localToday = now.toISOString().slice(0, 10);
+	const utcToday = new Date(
+		Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+	)
+		.toISOString()
+		.slice(0, 10);
+
+	return Array.from(new Set([localToday, utcToday]));
 }
 
 function getYesterdayIsoCandidates(): string[] {
@@ -255,6 +271,31 @@ function deliveryIssueSnippet(report: WorkReport): string {
 	return truncateText(report.pendingActions || report.summary || "Sin detalle", 140);
 }
 
+function buildWhoReportedAnswer(
+	reports: WorkReport[],
+	dateLabel: string,
+	dateCandidates: string[],
+): string | null {
+	const matchingReports = reports.filter((r) =>
+		dateCandidates.includes(r.serviceDate),
+	);
+
+	if (matchingReports.length === 0) {
+		return `No encontré reportes con fecha de ${dateLabel}.`;
+	}
+
+	const names = Array.from(
+		new Set(matchingReports.map((r) => r.employeeName).filter(Boolean)),
+	).sort();
+
+	if (names.length === 0) {
+		return `Hay ${matchingReports.length} reporte(s) de ${dateLabel} pero sin nombre de empleado registrado.`;
+	}
+
+	const list = names.map((n) => `• ${n}`).join("\n");
+	return `Los empleados que enviaron reporte ${dateLabel} (${matchingReports.length} reporte${matchingReports.length !== 1 ? "s" : ""}):\n${list}`;
+}
+
 export function tryHeuristicAnswer(
 	question: string,
 	reports: WorkReport[],
@@ -264,6 +305,22 @@ export function tryHeuristicAnswer(
 	}
 
 	const normalizedQuestion = normalizeForMatch(question);
+
+	// Heurística: ¿quiénes enviaron su reporte hoy?
+	const asksWhoReported =
+		/(quienes|quien|quiénes|quién)/.test(normalizedQuestion) &&
+		/(enviaron|envio|envió|mando|entrego|entregaron|hicieron|subieron)/.test(normalizedQuestion) &&
+		/(reporte|reportes|informe|informes)/.test(normalizedQuestion);
+
+	if (asksWhoReported) {
+		if (normalizedQuestion.includes("hoy")) {
+			return buildWhoReportedAnswer(reports, "hoy", getTodayIsoCandidates());
+		}
+		if (normalizedQuestion.includes("ayer")) {
+			return buildWhoReportedAnswer(reports, "ayer", getYesterdayIsoCandidates());
+		}
+	}
+
 	const asksAboutProductDelivery =
 		normalizedQuestion.includes("producto") &&
 		/(envio|entrego|entrega|recibio|recibieron|recibir)/.test(
