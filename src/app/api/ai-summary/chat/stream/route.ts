@@ -20,7 +20,7 @@ export const runtime = "nodejs";
 export const maxDuration = 180;
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.2";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:7b";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY?.trim();
 
 const QA_SYSTEM_PROMPT = `Eres un asistente operativo que responde preguntas sobre reportes de trabajo.

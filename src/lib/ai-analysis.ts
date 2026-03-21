@@ -16,7 +16,7 @@ export type AiSummary = {
 };
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.2";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:7b";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY?.trim();
 
 const SYSTEM_PROMPT = `Eres un asistente de análisis operativo para una empresa de servicios técnicos de campo.
