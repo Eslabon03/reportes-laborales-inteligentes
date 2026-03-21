@@ -235,7 +235,7 @@ export async function POST(request: Request) {
         try {
           const response = await ollama.chat({
             model: OLLAMA_MODEL,
-            options: { temperature: 0.2 },
+            options: { temperature: 0.2, num_ctx: 4096, num_predict: 300 },
             stream: true,
             messages: [
               { role: "system", content: QA_SYSTEM_PROMPT },

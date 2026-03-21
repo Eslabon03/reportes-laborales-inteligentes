@@ -59,7 +59,7 @@ Reglas:
 - Responde en español, **breve y conciso** (máximo 3-4 oraciones cortas).
 - Si es una lista, usa viñetas breves, no párrafos.`;
 
-export const QA_REPORT_LIMIT = 40; // Reducido de 80 para respuestas más rápidas
+export const QA_REPORT_LIMIT = 20; // Reducido para respuestas más rápidas
 export const QA_TEXT_MAX_LENGTH = 140; // Reducido para contexto más compacto
 
 const DELIVERY_ISSUE_PATTERN =
@@ -165,7 +165,7 @@ function makeFetch(): typeof fetch {
 }
 
 export function buildSummaryContext(summary: AiSummary): string {
-	return JSON.stringify(summary, null, 2);
+	return JSON.stringify(summary);
 }
 
 function normalizeForMatch(value: string): string {
@@ -478,7 +478,7 @@ export function buildChatHistoryContext(messages: AiChatMessage[]): string {
 	}
 
 	const historyLines = messages
-		.slice(-6) // Últimos 6 mensajes (3 rondas de preguntas-respuesta)
+			.slice(-4) // Últimos 4 mensajes (2 rondas de preguntas-respuesta)
 		.map((msg) => {
 			const prefix = msg.role === "user" ? "Pregunta anterior" : "Mi respuesta previa";
 			return `${prefix}:\n${msg.content}`;
@@ -512,7 +512,7 @@ export async function answerQuestionAboutSummary(
 
 	const response = await ollama.chat({
 		model: OLLAMA_MODEL,
-		options: { temperature: 0.2 },
+		options: { temperature: 0.2, num_ctx: 4096, num_predict: 300 },
 		messages: [
 			{ role: "system", content: QA_SYSTEM_PROMPT },
 			{
