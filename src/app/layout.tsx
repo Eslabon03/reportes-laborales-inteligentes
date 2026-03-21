@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Manrope } from "next/font/google";
 import "./globals.css";
+import { FloatingChatButton } from "@/components/floating-chat-button";
 
 const manrope = Manrope({
   variable: "--font-manrope",
@@ -31,6 +32,7 @@ export default function RootLayout({
         className={`${manrope.variable} ${plexMono.variable} antialiased`}
       >
         {children}
+          <FloatingChatButton />
       </body>
     </html>
   );

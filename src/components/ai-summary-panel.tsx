@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { AIConversationPanel } from "@/components/ai-conversation-panel";
 import { ChatHistoryModal } from "@/components/chat-history-modal";
 import { SectionShell } from "@/components/section-shell";
 import { StatusPill } from "@/components/status-pill";
@@ -544,12 +543,6 @@ export function AiSummaryPanel({ reports = [] }: { reports?: WorkReport[] }) {
                 </div>
               ) : null}
 
-              {selectedAnalysisId && (
-                <AIConversationPanel
-                  analysisId={selectedAnalysisId}
-                  onHistoryClick={() => setIsHistoryModalOpen(true)}
-                />
-              )}
             </div>
           )}
         </div>
