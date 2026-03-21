@@ -13,6 +13,9 @@ export const runtime = "nodejs";
 // Allow up to 3 minutes for Ollama to respond locally
 export const maxDuration = 180;
 
+const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:7b";
+
 type ApiAiHistoryItem = {
   id: number;
   generatedAt: string;
@@ -163,7 +166,7 @@ export async function POST() {
       return NextResponse.json(
         {
           error:
-            "No se pudo conectar con Ollama. Asegúrate de que esté corriendo (ollama serve) y de que el modelo esté descargado (ollama pull llama3.2).",
+            `No se pudo conectar con Ollama en ${OLLAMA_HOST}. Verifica que el servicio esté activo y accesible desde este servidor, y que el modelo '${OLLAMA_MODEL}' esté disponible (ollama pull ${OLLAMA_MODEL}).`,
         },
         { status: 503 },
       );

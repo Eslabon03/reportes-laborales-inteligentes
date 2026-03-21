@@ -17,6 +17,9 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 180;
 
+const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:7b";
+
 type ChatRequestPayload = {
   analysisId?: number;
   question?: string;
@@ -271,7 +274,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "No se pudo conectar con Ollama. Verifica que esté activo y accesible.",
+            `No se pudo conectar con Ollama en ${OLLAMA_HOST}. Verifica conectividad desde el servidor y disponibilidad del modelo '${OLLAMA_MODEL}'.`,
         },
         { status: 503 },
       );
