@@ -202,6 +202,12 @@ async function chatWithOllamaFailover(
 			throw error;
 		}
 
+		const errorMessage =
+			error instanceof Error ? error.message : String(error);
+		console.warn(
+			`[ollama] Primary host failed (${OLLAMA_HOST}). Switching to fallback host (${OLLAMA_FALLBACK_HOST}). Error: ${errorMessage}`,
+		);
+
 		const fallback = new Ollama({
 			host: OLLAMA_FALLBACK_HOST,
 			fetch: makeFetch(OLLAMA_FALLBACK_API_KEY),
