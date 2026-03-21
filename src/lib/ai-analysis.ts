@@ -271,6 +271,58 @@ function deliveryIssueSnippet(report: WorkReport): string {
 	return truncateText(report.pendingActions || report.summary || "Sin detalle", 140);
 }
 
+const SPANISH_MONTHS: Record<string, number> = {
+	enero: 1,
+	febrero: 2,
+	marzo: 3,
+	abril: 4,
+	mayo: 5,
+	junio: 6,
+	julio: 7,
+	agosto: 8,
+	septiembre: 9,
+	octubre: 10,
+	noviembre: 11,
+	diciembre: 12,
+};
+
+/**
+ * Intenta extraer una fecha ISO (YYYY-MM-DD) de una pregunta en español.
+ * Soporta: "20 de marzo", "el 20 de marzo", "20 de marzo de 2026", "20/3", "20/03/2026".
+ * Devuelve null si no encuentra una fecha reconocible.
+ */
+function parseSpanishDate(normalizedQuestion: string): { iso: string; label: string } | null {
+	// Formato: "20 de marzo" / "20 de marzo de 2026"
+	const textMatch = normalizedQuestion.match(
+		/(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(?:\s+de\s+(\d{4}))?/,
+	);
+	if (textMatch) {
+		const day = parseInt(textMatch[1], 10);
+		const month = SPANISH_MONTHS[textMatch[2]];
+		const year = textMatch[3] ? parseInt(textMatch[3], 10) : new Date().getFullYear();
+		if (month && day >= 1 && day <= 31) {
+			const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+			const label = `el ${day} de ${textMatch[2]}${textMatch[3] ? ` de ${year}` : ""}`;
+			return { iso, label };
+		}
+	}
+
+	// Formato numérico: "20/3" / "20/03" / "20/03/2026"
+	const numMatch = normalizedQuestion.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/);
+	if (numMatch) {
+		const day = parseInt(numMatch[1], 10);
+		const month = parseInt(numMatch[2], 10);
+		const year = numMatch[3] ? parseInt(numMatch[3], 10) : new Date().getFullYear();
+		if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+			const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+			const label = `el ${day}/${month}${numMatch[3] ? `/${year}` : ""}`;
+			return { iso, label };
+		}
+	}
+
+	return null;
+}
+
 function buildWhoReportedAnswer(
 	reports: WorkReport[],
 	dateLabel: string,
@@ -318,6 +370,24 @@ export function tryHeuristicAnswer(
 		}
 		if (normalizedQuestion.includes("ayer")) {
 			return buildWhoReportedAnswer(reports, "ayer", getYesterdayIsoCandidates());
+		}
+		// Fecha específica: "el 20 de marzo", "20/03/2026", etc.
+		const parsedDate = parseSpanishDate(normalizedQuestion);
+		if (parsedDate) {
+			return buildWhoReportedAnswer(reports, parsedDate.label, [parsedDate.iso]);
+		}
+	}
+
+	// También aplica heurística de fecha específica sin palabras clave de "quién"
+	// para preguntas como "¿quién reportó el 20 de marzo?" con variantes de verbo
+	const asksWhoWithDate =
+		/(quien|quienes|qui[eé]n|qui[eé]nes)/.test(normalizedQuestion) &&
+		/(reporte|reportes|report[oó]|envi[oó]|mand[oó]|entreg[oó]|informe)/.test(normalizedQuestion);
+
+	if (asksWhoWithDate) {
+		const parsedDate = parseSpanishDate(normalizedQuestion);
+		if (parsedDate) {
+			return buildWhoReportedAnswer(reports, parsedDate.label, [parsedDate.iso]);
 		}
 	}
 
