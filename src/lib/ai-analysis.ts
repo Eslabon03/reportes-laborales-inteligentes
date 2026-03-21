@@ -358,33 +358,43 @@ export function tryHeuristicAnswer(
 
 	const normalizedQuestion = normalizeForMatch(question);
 
-	// Heurística: ¿quiénes enviaron su reporte hoy?
-	const asksWhoReported =
-		/(quienes|quien|quiénes|quién)/.test(normalizedQuestion) &&
-		/(enviaron|envio|envió|mando|entrego|entregaron|hicieron|subieron)/.test(normalizedQuestion) &&
-		/(reporte|reportes|informe|informes)/.test(normalizedQuestion);
+	// ── Detección amplia de "¿quién(es)?" ────────────────────────────────────
+	// Cubre: quien, quienes, qué empleado, cuáles empleados, dime los que, etc.
+	const asksWhoPerson =
+		/(quien|quienes|que empleado|cuales empleados|cual empleado|dime (los|las|quienes)|nombres? de|lista(r)? (los|las)|empleados? que)/.test(
+			normalizedQuestion,
+		);
 
-	if (asksWhoReported) {
+	if (asksWhoPerson) {
+		// Primero intenta con fecha específica en la pregunta
+		const parsedDate = parseSpanishDate(normalizedQuestion);
+		if (parsedDate) {
+			return buildWhoReportedAnswer(reports, parsedDate.label, [parsedDate.iso]);
+		}
+		// Sin fecha → intenta "hoy" o "ayer"
 		if (normalizedQuestion.includes("hoy")) {
 			return buildWhoReportedAnswer(reports, "hoy", getTodayIsoCandidates());
 		}
 		if (normalizedQuestion.includes("ayer")) {
 			return buildWhoReportedAnswer(reports, "ayer", getYesterdayIsoCandidates());
 		}
-		// Fecha específica: "el 20 de marzo", "20/03/2026", etc.
-		const parsedDate = parseSpanishDate(normalizedQuestion);
-		if (parsedDate) {
-			return buildWhoReportedAnswer(reports, parsedDate.label, [parsedDate.iso]);
+		// Sin indicador temporal → responde con todos los reportes disponibles
+		const allNames = Array.from(
+			new Set(reports.map((r) => r.employeeName).filter(Boolean)),
+		).sort();
+		if (allNames.length > 0) {
+			const list = allNames.map((n) => `• ${n}`).join("\n");
+			return `Empleados con reporte registrado (${reports.length} reporte${reports.length !== 1 ? "s" : ""} total):\n${list}`;
 		}
 	}
 
-	// También aplica heurística de fecha específica sin palabras clave de "quién"
-	// para preguntas como "¿quién reportó el 20 de marzo?" con variantes de verbo
-	const asksWhoWithDate =
-		/(quien|quienes|qui[eé]n|qui[eé]nes)/.test(normalizedQuestion) &&
-		/(reporte|reportes|report[oó]|envi[oó]|mand[oó]|entreg[oó]|informe)/.test(normalizedQuestion);
-
-	if (asksWhoWithDate) {
+	// ── Fallback: pregunta con fecha específica + cualquier mención de reporte ─
+	// Cubre frases sin "quien" explícito pero con fecha y contexto de reporte
+	const mentionsReport =
+		/(reporte|reportes|informe|informes|enviaron|envio|entregaron|registraron|subieron|mandaron)/.test(
+			normalizedQuestion,
+		);
+	if (mentionsReport) {
 		const parsedDate = parseSpanishDate(normalizedQuestion);
 		if (parsedDate) {
 			return buildWhoReportedAnswer(reports, parsedDate.label, [parsedDate.iso]);
