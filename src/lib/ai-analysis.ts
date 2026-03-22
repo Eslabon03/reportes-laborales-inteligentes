@@ -698,35 +698,51 @@ export async function generateAiSummary(
 		],
 	};
 
-	const response = await chatWithOllamaFailover(request);
-	let parsed = parseAiResponse(response.message.content);
+	try {
+		const response = await chatWithOllamaFailover(request);
+		let parsed = parseAiResponse(response.message.content);
 
-	if (hasMeaningfulSummary(parsed)) {
-		return { summary: parsed, source: "ai" };
+		if (hasMeaningfulSummary(parsed)) {
+			return { summary: parsed, source: "ai" };
+		}
+
+		const retryResponse = await chatWithOllamaFailover({
+			...request,
+			messages: [
+				{
+					role: "system",
+					content:
+						`${SYSTEM_PROMPT}\n\nSi falta un campo, complétalo con texto breve útil. Nunca devuelvas valores vacíos en 'resumen'.`,
+				},
+				request.messages[1],
+			],
+		});
+
+		parsed = parseAiResponse(retryResponse.message.content);
+
+		if (hasMeaningfulSummary(parsed)) {
+			return { summary: parsed, source: "ai" };
+		}
+
+		return {
+			summary: buildFallbackAiSummaryFromReports(reports),
+			source: "fallback",
+		};
+	} catch (error) {
+		if (!isConnectionError(error)) {
+			throw error;
+		}
+
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.warn(
+			`[ollama] AI summary generation fell back to local summary because Ollama was unreachable. Error: ${errorMessage}`,
+		);
+
+		return {
+			summary: buildFallbackAiSummaryFromReports(reports),
+			source: "fallback",
+		};
 	}
-
-	const retryResponse = await chatWithOllamaFailover({
-		...request,
-		messages: [
-			{
-				role: "system",
-				content:
-					`${SYSTEM_PROMPT}\n\nSi falta un campo, complétalo con texto breve útil. Nunca devuelvas valores vacíos en 'resumen'.`,
-			},
-			request.messages[1],
-		],
-	});
-
-	parsed = parseAiResponse(retryResponse.message.content);
-
-	if (hasMeaningfulSummary(parsed)) {
-		return { summary: parsed, source: "ai" };
-	}
-
-	return {
-		summary: buildFallbackAiSummaryFromReports(reports),
-		source: "fallback",
-	};
 }
 
 export type AiChatMessage = {
