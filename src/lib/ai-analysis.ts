@@ -15,6 +15,13 @@ export type AiSummary = {
 	riesgos: string[];
 };
 
+export type AiSummarySource = "ai" | "fallback";
+
+export type AiSummaryGenerationResult = {
+	summary: AiSummary;
+	source: AiSummarySource;
+};
+
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:7b";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY?.trim();
@@ -655,7 +662,7 @@ export function tryHeuristicAnswer(
 
 export async function generateAiSummary(
 	reports: WorkReport[],
-): Promise<AiSummary> {
+): Promise<AiSummaryGenerationResult> {
 	const userContent = buildReportSummary(reports);
 
 	const request = {
@@ -675,7 +682,7 @@ export async function generateAiSummary(
 	let parsed = parseAiResponse(response.message.content);
 
 	if (hasMeaningfulSummary(parsed)) {
-		return parsed;
+		return { summary: parsed, source: "ai" };
 	}
 
 	const retryResponse = await chatWithOllamaFailover({
@@ -693,10 +700,13 @@ export async function generateAiSummary(
 	parsed = parseAiResponse(retryResponse.message.content);
 
 	if (hasMeaningfulSummary(parsed)) {
-		return parsed;
+		return { summary: parsed, source: "ai" };
 	}
 
-	return buildFallbackAiSummaryFromReports(reports);
+	return {
+		summary: buildFallbackAiSummaryFromReports(reports),
+		source: "fallback",
+	};
 }
 
 export type AiChatMessage = {

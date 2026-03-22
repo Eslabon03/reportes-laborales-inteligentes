@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { generateAiSummary, type AiSummary } from "@/lib/ai-analysis";
+import {
+  generateAiSummary,
+  type AiSummary,
+  type AiSummarySource,
+} from "@/lib/ai-analysis";
 import { getSessionUser } from "@/lib/auth";
 import {
   listAiAnalysisHistory,
@@ -22,6 +26,12 @@ type ApiAiHistoryItem = {
   generatedByName: string;
   sourceReportsCount: number;
   summary: AiSummary;
+  generationSource: AiSummarySource;
+};
+
+type StoredSummaryPayload = {
+  summary: AiSummary;
+  source: AiSummarySource;
 };
 
 function fallbackSummary(): AiSummary {
@@ -82,15 +92,39 @@ function sanitizeSummary(candidate: unknown): AiSummary {
   };
 }
 
+function parseStoredSummaryPayload(candidate: unknown): StoredSummaryPayload {
+  if (!candidate || typeof candidate !== "object") {
+    return { summary: fallbackSummary(), source: "fallback" };
+  }
+
+  const parsed = candidate as Record<string, unknown>;
+  const hasWrappedShape = "summary" in parsed;
+
+  if (hasWrappedShape) {
+    const source = parsed.source === "fallback" ? "fallback" : "ai";
+    return {
+      summary: sanitizeSummary(parsed.summary),
+      source,
+    };
+  }
+
+  return {
+    summary: sanitizeSummary(parsed),
+    source: "ai",
+  };
+}
+
 function mapHistoryItem(entry: AiAnalysisHistoryEntry): ApiAiHistoryItem {
   try {
     const parsed = JSON.parse(entry.summaryJson);
+    const payload = parseStoredSummaryPayload(parsed);
     return {
       id: entry.id,
       generatedAt: entry.createdAt,
       generatedByName: entry.createdByName,
       sourceReportsCount: entry.sourceReportsCount,
-      summary: sanitizeSummary(parsed),
+      summary: payload.summary,
+      generationSource: payload.source,
     };
   } catch {
     return {
@@ -99,6 +133,7 @@ function mapHistoryItem(entry: AiAnalysisHistoryEntry): ApiAiHistoryItem {
       generatedByName: entry.createdByName,
       sourceReportsCount: entry.sourceReportsCount,
       summary: fallbackSummary(),
+      generationSource: "fallback",
     };
   }
 }
@@ -146,12 +181,12 @@ export async function POST() {
   }
 
   try {
-    const summary = await generateAiSummary(reports);
+    const generation = await generateAiSummary(reports);
 
     const saved = saveAiAnalysisHistoryEntry({
       createdByUserId: currentUser.id,
       sourceReportsCount: reports.length,
-      summaryJson: JSON.stringify(summary),
+      summaryJson: JSON.stringify(generation),
     });
 
     return NextResponse.json({ analysis: mapHistoryItem(saved) });

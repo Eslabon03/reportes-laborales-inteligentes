@@ -112,6 +112,20 @@ function sanitizeSummary(candidate: unknown): AiSummary {
   };
 }
 
+function extractStoredSummary(candidate: unknown): AiSummary {
+  if (!candidate || typeof candidate !== "object") {
+    return sanitizeSummary(candidate);
+  }
+
+  const parsed = candidate as Record<string, unknown>;
+
+  if ("summary" in parsed) {
+    return sanitizeSummary(parsed.summary);
+  }
+
+  return sanitizeSummary(parsed);
+}
+
 async function requireAdmin() {
   const currentUser = await getSessionUser();
 
@@ -214,7 +228,7 @@ export async function POST(request: Request) {
   let summary: AiSummary;
 
   try {
-    summary = sanitizeSummary(JSON.parse(entry.summaryJson));
+    summary = extractStoredSummary(JSON.parse(entry.summaryJson));
   } catch {
     return NextResponse.json(
       { error: "No se pudo leer el contenido del análisis seleccionado." },

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatHistoryModal } from "@/components/chat-history-modal";
 import { SectionShell } from "@/components/section-shell";
 import { StatusPill } from "@/components/status-pill";
-import type { AiPriority, AiSummary } from "@/lib/ai-analysis";
+import type { AiPriority, AiSummary, AiSummarySource } from "@/lib/ai-analysis";
 import { formatDisplayDate, getStatusTone, type WorkReport } from "@/lib/reports";
 
 type AiHistoryItem = {
@@ -14,6 +14,7 @@ type AiHistoryItem = {
   generatedByName: string;
   sourceReportsCount: number;
   summary: AiSummary;
+  generationSource: AiSummarySource;
 };
 
 type RecommendationMatch = {
@@ -461,10 +462,24 @@ export function AiSummaryPanel({ reports = [] }: { reports?: WorkReport[] }) {
             </button>
 
             {selectedAnalysis && (
-              <p className="text-xs text-slate-500">
-                Seleccionado: {formatTimestamp(selectedAnalysis.generatedAt)} ·{" "}
-                {selectedAnalysis.generatedByName} · {selectedAnalysis.sourceReportsCount} reportes
-              </p>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <p>
+                  Seleccionado: {formatTimestamp(selectedAnalysis.generatedAt)} ·{" "}
+                  {selectedAnalysis.generatedByName} · {selectedAnalysis.sourceReportsCount} reportes
+                </p>
+                <span
+                  className={[
+                    "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                    selectedAnalysis.generationSource === "fallback"
+                      ? "border-amber-300 bg-amber-50 text-amber-800"
+                      : "border-emerald-300 bg-emerald-50 text-emerald-800",
+                  ].join(" ")}
+                >
+                  {selectedAnalysis.generationSource === "fallback"
+                    ? "Resumen de respaldo"
+                    : "Generado por IA"}
+                </span>
+              </div>
             )}
           </div>
 
