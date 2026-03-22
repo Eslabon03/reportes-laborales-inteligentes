@@ -92,6 +92,14 @@ function sanitizeSummary(candidate: unknown): AiSummary {
   };
 }
 
+function hasMeaningfulSummary(summary: AiSummary): boolean {
+  return (
+    summary.resumen.trim().length > 0 &&
+    summary.resumen !== "No se pudo generar un resumen." &&
+    summary.resumen !== "No se pudo recuperar el resumen de este análisis."
+  );
+}
+
 function parseStoredSummaryPayload(candidate: unknown): StoredSummaryPayload {
   if (!candidate || typeof candidate !== "object") {
     return { summary: fallbackSummary(), source: "fallback" };
@@ -101,16 +109,19 @@ function parseStoredSummaryPayload(candidate: unknown): StoredSummaryPayload {
   const hasWrappedShape = "summary" in parsed;
 
   if (hasWrappedShape) {
+    const summary = sanitizeSummary(parsed.summary);
     const source = parsed.source === "fallback" ? "fallback" : "ai";
     return {
-      summary: sanitizeSummary(parsed.summary),
-      source,
+      summary,
+      source: hasMeaningfulSummary(summary) ? source : "fallback",
     };
   }
 
+  const summary = sanitizeSummary(parsed);
+
   return {
-    summary: sanitizeSummary(parsed),
-    source: "ai",
+    summary,
+    source: hasMeaningfulSummary(summary) ? "ai" : "fallback",
   };
 }
 

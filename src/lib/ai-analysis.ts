@@ -164,7 +164,8 @@ function parseAiResponse(raw: string): AiSummary {
 function hasMeaningfulSummary(summary: AiSummary): boolean {
 	return (
 		summary.resumen.trim().length > 0 &&
-		summary.resumen !== "No se pudo generar un resumen."
+		summary.resumen !== "No se pudo generar un resumen." &&
+		summary.resumen !== "No se pudo recuperar el resumen de este análisis."
 	);
 }
 
@@ -256,16 +257,35 @@ function makeFetch(apiKey?: string): typeof fetch {
 }
 
 function isConnectionError(error: unknown): error is Error {
-	if (!(error instanceof Error)) {
-		return false;
+	const texts: string[] = [];
+	let current: unknown = error;
+
+	while (current) {
+		if (current instanceof Error) {
+			texts.push(current.message);
+			current = (current as Error & { cause?: unknown }).cause;
+			continue;
+		}
+
+		texts.push(String(current));
+		break;
 	}
 
-	return (
-		error.message.includes("ECONNREFUSED") ||
-		error.message.includes("fetch failed") ||
-		error.message.includes("connect") ||
-		error.message.includes("ETIMEDOUT")
-	);
+	const combined = texts.join(" | ").toLowerCase();
+
+	return [
+		"econnrefused",
+		"fetch failed",
+		"connect",
+		"etimedout",
+		"timeout",
+		"network",
+		"socket",
+		"ehostunreach",
+		"enetunreach",
+		"other side closed",
+		"und_err",
+	].some((token) => combined.includes(token));
 }
 
 async function chatWithOllamaFailover(
