@@ -154,6 +154,84 @@ function parseAiResponse(raw: string): AiSummary {
 	return { resumen, prioridades, recomendaciones, riesgos };
 }
 
+function hasMeaningfulSummary(summary: AiSummary): boolean {
+	return (
+		summary.resumen.trim().length > 0 &&
+		summary.resumen !== "No se pudo generar un resumen."
+	);
+}
+
+function buildFallbackAiSummaryFromReports(reports: WorkReport[]): AiSummary {
+	if (reports.length === 0) {
+		return {
+			resumen: "No hay reportes cargados para analizar en este momento.",
+			prioridades: [],
+			recomendaciones: [
+				"Registrar nuevos reportes para habilitar análisis operativo.",
+			],
+			riesgos: [],
+		};
+	}
+
+	const activeReports = reports.filter((report) => report.status !== "resuelto");
+	const source = activeReports.length > 0 ? activeReports : reports;
+
+	const quoteCount = source.filter((report) => report.requiresQuote).length;
+	const invoiceCount = source.filter((report) => report.requiresInvoice).length;
+	const followUpCount = source.filter((report) => report.followUpRequired).length;
+
+	const byClient = new Map<string, number>();
+	for (const report of source) {
+		byClient.set(report.clientName, (byClient.get(report.clientName) ?? 0) + 1);
+	}
+
+	const topClients = [...byClient.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, 3)
+		.map(([cliente, count]) => ({
+			cliente,
+			descripcion: `${count} reporte${count !== 1 ? "s" : ""} activo${count !== 1 ? "s" : ""} con pendientes por cerrar.`,
+			urgencia: count >= 3 ? "alta" : count === 2 ? "media" : "baja",
+		})) as AiPriority[];
+
+	const recomendaciones: string[] = [];
+	if (quoteCount > 0) {
+		recomendaciones.push(`Priorizar ${quoteCount} pendiente${quoteCount !== 1 ? "s" : ""} de cotización para evitar retrasos comerciales.`);
+	}
+	if (invoiceCount > 0) {
+		recomendaciones.push(`Programar cierre de ${invoiceCount} pendiente${invoiceCount !== 1 ? "s" : ""} de facturación con validación de soporte.`);
+	}
+	if (followUpCount > 0) {
+		recomendaciones.push(`Dar seguimiento a ${followUpCount} caso${followUpCount !== 1 ? "s" : ""} abierto${followUpCount !== 1 ? "s" : ""} para evitar acumulación operativa.`);
+	}
+
+	if (recomendaciones.length === 0) {
+		recomendaciones.push("Revisar reportes recientes y confirmar cierre operativo con cada cliente.");
+	}
+
+	const riesgos: string[] = [];
+	if (followUpCount >= 4) {
+		riesgos.push("Riesgo de retrasos por alta carga de seguimientos pendientes.");
+	}
+	if (invoiceCount >= 3) {
+		riesgos.push("Riesgo de flujo de caja por facturación pendiente acumulada.");
+	}
+	if (quoteCount >= 3) {
+		riesgos.push("Riesgo de pérdida de oportunidades por cotizaciones sin enviar.");
+	}
+
+	const resumen =
+		`Se analizaron ${source.length} reporte${source.length !== 1 ? "s" : ""} ${activeReports.length > 0 ? "activos" : "recientes"}. ` +
+		`${followUpCount} requieren seguimiento, ${quoteCount} requieren cotización y ${invoiceCount} requieren facturación.`;
+
+	return {
+		resumen,
+		prioridades: topClients,
+		recomendaciones: recomendaciones.slice(0, 5),
+		riesgos: riesgos.slice(0, 4),
+	};
+}
+
 function makeFetch(apiKey?: string): typeof fetch {
 	return (url: RequestInfo | URL, init?: RequestInit) => {
 		const headers = new Headers(init?.headers);
@@ -580,7 +658,7 @@ export async function generateAiSummary(
 ): Promise<AiSummary> {
 	const userContent = buildReportSummary(reports);
 
-	const response = await chatWithOllamaFailover({
+	const request = {
 		model: OLLAMA_MODEL,
 		format: "json",
 		options: { temperature: 0.2 },
@@ -591,9 +669,34 @@ export async function generateAiSummary(
 				content: `Analiza los siguientes reportes y devuelve el JSON de análisis operativo:\n\n${userContent}`,
 			},
 		],
+	};
+
+	const response = await chatWithOllamaFailover(request);
+	let parsed = parseAiResponse(response.message.content);
+
+	if (hasMeaningfulSummary(parsed)) {
+		return parsed;
+	}
+
+	const retryResponse = await chatWithOllamaFailover({
+		...request,
+		messages: [
+			{
+				role: "system",
+				content:
+					`${SYSTEM_PROMPT}\n\nSi falta un campo, complétalo con texto breve útil. Nunca devuelvas valores vacíos en 'resumen'.`,
+			},
+			request.messages[1],
+		],
 	});
 
-	return parseAiResponse(response.message.content);
+	parsed = parseAiResponse(retryResponse.message.content);
+
+	if (hasMeaningfulSummary(parsed)) {
+		return parsed;
+	}
+
+	return buildFallbackAiSummaryFromReports(reports);
 }
 
 export type AiChatMessage = {
